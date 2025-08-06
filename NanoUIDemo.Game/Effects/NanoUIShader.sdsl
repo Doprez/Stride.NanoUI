@@ -1,0 +1,132 @@
+﻿shader NanoUIShader : ShaderBase 
+{
+    matrix proj;
+    stage Texture2D tex;
+
+    SamplerState TexSampler {
+        Filter = ANISOTROPIC;
+        AddressU = Wrap;
+        AddressV = Wrap;
+        MaxAnisotropy = 16;
+    };
+
+    cbuffer PS_CONSTANTS
+    {
+        float4x4 scissorMat;
+        float4x4 paintMat;
+        float4 innerCol;
+        float4 outerCol;
+        float2 scissorExt;
+        float2 scissorScale;
+        
+        float2 extent;
+        float radius;
+        float feather;
+        
+        float actionType;
+        float fontSize;
+        float unused1;
+        float unused2;
+    };
+    
+    stream float2 pos : POSITION;    // vertex position
+    stream float2 ftcoord    : TEXCOORD0;      // float 2 tex coord
+    stream float2 fpos       : TEXCOORD1;      // float 2 position 
+
+    override stage void VSMain() 
+    {
+        streams.ShadingPosition = mul(proj, float4(streams.pos, 0.0, 1.0f)) + float4(-1.0f, 1.0f, 0.0f, 0.0f);
+    }
+
+    override stage void PSMain() 
+    {
+        float4 result;
+        float scissor = scissorMask(streams.fpos);
+        float strokeAlpha = 1.0f;
+
+        if (actionType == 0) 
+        {
+            // Calculate gradient color using box gradient
+            float2 pt = (mul(paintMat, float4(streams.fpos,0,1.0))).xy;
+            float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
+            float4 color = lerp(innerCol, outerCol, d);
+            
+            // Combine alpha
+            color *= strokeAlpha * scissor;
+            result = color;
+        }
+        else if (actionType == 1)
+        {
+            // Calculate color fron texture
+            float2 pt = (mul(paintMat, float4(streams.fpos,0,1.0))).xy / extent;
+            float4 color = tex.Sample(TexSampler, pt);
+            
+            color = float4(color.xyz*color.w,color.w);
+            
+            // Apply color tint and alpha.
+            //color *= innerCol;
+            // Apply color tint if spedified
+            if(innerCol.r != 0 || innerCol.g != 0 || innerCol.b != 0 || innerCol.a != 0)
+            {
+                color *= innerCol;
+            }
+
+            // Combine alpha
+            color *= strokeAlpha * scissor;
+            result = color;
+        }
+        else if (actionType == 2)
+        {
+            // Stencil fill
+            result = float4(1,1,1,1);
+        } 
+        else if (actionType == 3)
+        {
+            // Normal text rendering
+
+            // full color (RGBA)
+            //float4 color = tex.Sample(TexSampler, streams.ftcoord);
+            // color = float4(color.xyz*color.w,color.w);
+            
+            // only r channel active (R)
+            float col = tex.Sample(TexSampler, streams.ftcoord).x;
+            float4 color = float4(col, col, col, col);
+
+            color *= scissor;
+            result = (color * innerCol);
+        }
+        else //if (actionType == 4)
+        {
+            // SDF text
+	    	// this works also with normal baking - could be still simpler!
+            float distance = tex.Sample(TexSampler, streams.ftcoord).x;
+
+            // The right smoothing value for crisp fonts is 0.25f / (spread * scale)
+	    	// - spread is the value you used when generating the font
+	    	// - scale is the scale you’re drawing it at
+
+            // note: this algo could be better/different!
+            float weight = 0.5;
+            float smoothing = clamp(4.0 / fontSize, 0.0, 0.5);
+            float alpha = smoothstep(weight - smoothing, weight + smoothing, distance);
+
+            result = float4(innerCol.xyz, innerCol.w * alpha) * scissor;
+        }
+        streams.ColorTarget = result;
+    }
+
+    float sdroundrect(float2 pt, float2 ext, float rad) 
+    {
+        float2 ext2 = ext - float2(rad,rad);
+        float2 d = abs(pt) - ext2;
+        return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
+    }
+    
+    // Scissoring
+    float scissorMask(float2 p) 
+    {
+        float2 sc = (abs((mul(scissorMat, float4(p.x, p.y,0, 1.0))).xy) - scissorExt);
+        sc = float2(0.5,0.5) - sc * scissorScale;
+        return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
+    }
+};

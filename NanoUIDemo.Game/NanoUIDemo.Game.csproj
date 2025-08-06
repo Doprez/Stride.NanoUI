@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <RootNamespace>NanoUIDemo</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Stride.Core" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
+    <PackageReference Include="Stride.Core.Assets.CompilerApp" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" IncludeAssets="build" />
+    <PackageReference Include="Stride.Engine" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
+    <PackageReference Include="Stride.Particles" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
+    <PackageReference Include="Stride.UI" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
+	  <PackageReference Include="nanoui" Version="1.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Effects\Effect.sdsl.cs">
+      <DesignTime>True</DesignTime>
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+    </Compile>
+    <Compile Update="Effects\NanoUIShader.sdsl.cs">
+      <DesignTime>True</DesignTime>
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Effects\Effect.sdsl">
+      <LastGenOutput>Effect.sdsl.cs</LastGenOutput>
+    </None>
+    <None Update="Effects\NanoUIShader.sdsl">
+      <LastGenOutput>NanoUIShader.sdsl.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+</Project>
