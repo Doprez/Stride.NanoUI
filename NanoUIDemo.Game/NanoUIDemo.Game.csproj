@@ -10,7 +10,9 @@
     <PackageReference Include="Stride.Engine" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
     <PackageReference Include="Stride.Particles" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
     <PackageReference Include="Stride.UI" Version="4.2.0.2381" PrivateAssets="contentfiles;analyzers" />
-	  <PackageReference Include="nanoui" Version="1.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\NanoUI\samples\NanoUIDemos\NanoUIDemos.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Effects\Effect.sdsl.cs">

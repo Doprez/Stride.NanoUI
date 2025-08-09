@@ -9,8 +9,10 @@ Meta:
 AssetFolders:
     -   Path: !dir ../Assets/Shared
     -   Path: !dir Effects
+    -   Path: !dir ../../../stride-dev/NanoUIDemo/NanoUIDemo/Assets/Shared
     -   Path: !dir ../Assets/Shared
-    -   Path: !dir D:/dev/stride-dev/NanoUIDemo/NanoUIDemo/Assets/Shared
+    -   Path: !dir ../Assets/Shared
+    -   Path: !dir D:/dev/GitControlledProjects/Stride.NanoUI/Assets/Shared
 ResourceFolders:
     - !dir ../Resources
 OutputGroupDirectories: {}

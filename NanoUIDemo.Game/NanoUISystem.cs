@@ -3,7 +3,7 @@ using NanoUI.Common;
 using NanoUI.Nvg;
 using NanoUI.Rendering;
 using NanoUI.Rendering.Data;
-//using NanoUIDemos;
+using NanoUIDemos;
 using Stride.Core;
 using Stride.Core.Annotations;
 using Stride.Core.Diagnostics;
@@ -19,7 +19,7 @@ using Texture2D = Stride.Graphics.Texture;
 
 namespace NanoUIDemo;
 
-public class NanoUISystem : GameSystemBase, INvgRenderer, IService
+public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 {
 
     const int INITIAL_VERTEX_BUFFER_SIZE = 128;
@@ -34,21 +34,19 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
     private EffectSystem _effectSystem;
     private CommandList _commandList;
 
-    private PipelineState _nanoPipeline;
     private VertexDeclaration _nanoVertLayout;
     VertexBufferBinding _vertexBinding;
     IndexBufferBinding _indexBinding;
     private EffectInstance _nanoShader;
+    private Dictionary<DrawCommandType, PipelineState> _pipelines = new();
 
     private Logger _log => GlobalLogger.GetLogger(nameof(NanoUISystem));
 
     // DemoTypes:
     // Docking, Drawing, SDFText, SvgShapes, TextShapes, UIBasic, UIExtended, UIExtended2,
     // UIExperimental, UILayouts
-    //static DemoType _demoType = DemoType.UIBasic;
-    //static DemoBase _demo;
-
-    bool ree = false;
+    static DemoType _demoType = DemoType.UIBasic;
+    static DemoBase _demo;
 
     public NanoUISystem([NotNull] IServiceRegistry registry) : base(registry)
     {
@@ -68,7 +66,7 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
         NvgContext nanoContext = new(this);
 
-        //_demo = DemoFactory.CreateDemo(nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
+        _demo = DemoFactory.CreateDemo(nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
 
         // vbos etc
         CreateDeviceObjects();
@@ -79,44 +77,12 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // set up a commandlist
         _commandList = _graphicsContext.CommandList;
 
-        // compile de shader
+        // compile the shader
         _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
         _nanoShader.UpdateEffect(GraphicsDevice);
 
-        var layout = new VertexDeclaration(
-            VertexElement.Position<Vector2>(),
-            VertexElement.TextureCoordinate<Vector2>(),
-            VertexElement.TextureCoordinate<Vector2>(1)
-        );
+        InitPipelineSates();
 
-        _nanoVertLayout = layout;
-
-        // de pipeline desc
-        var pipeline = new PipelineStateDescription()
-        {
-            BlendState = BlendStates.NonPremultiplied,
-
-            RasterizerState = new RasterizerStateDescription()
-            {
-                CullMode = CullMode.None,
-                DepthBias = 0,
-                FillMode = FillMode.Solid,
-                MultisampleAntiAliasLine = false,
-                ScissorTestEnable = true,
-                SlopeScaleDepthBias = 0,
-            },
-
-            PrimitiveType = PrimitiveType.TriangleList,
-            InputElements = _nanoVertLayout.CreateInputElements(),
-            DepthStencilState = DepthStencilStates.Default,
-
-            EffectBytecode = _nanoShader.Effect.Bytecode,
-            RootSignature = _nanoShader.RootSignature,
-
-            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
-        };
-
-        // finally set up the pipeline
         //var pipelineState = PipelineState.New(GraphicsDevice, ref pipeline);
         //_nanoPipeline = pipelineState;
 
@@ -126,9 +92,112 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
         _indexBinding = indexBufferBinding;
 
         var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, INITIAL_VERTEX_BUFFER_SIZE * _nanoVertLayout.CalculateSize(), GraphicsResourceUsage.Dynamic);
-        var vertexBufferBinding = new VertexBufferBinding(vertexBuffer, layout, 0);
+        var vertexBufferBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
         _vertexBinding = vertexBufferBinding;
     }
+
+    #region PipelineStates
+
+    void InitPipelineSates()
+    {
+        // model pipeline state
+        var layout = new VertexDeclaration(
+            VertexElement.TextureCoordinate<Vector2>(),
+            VertexElement.TextureCoordinate<Vector2>(1)
+        );
+
+        _nanoVertLayout = layout;
+
+        var modelPipeline = new PipelineStateDescription()
+        {
+            BlendState = BlendStates.AlphaBlend,
+
+            RasterizerState = new RasterizerStateDescription()
+            {
+                FillMode = FillMode.Solid,
+                CullMode = CullMode.Back,
+                FrontFaceCounterClockwise = true,
+                ScissorTestEnable = false,
+                DepthClipEnable = false,
+            },
+
+            DepthStencilState = DepthStencilStates.None,
+
+            PrimitiveType = PrimitiveType.TriangleList,
+            InputElements = _nanoVertLayout.CreateInputElements(),
+
+            EffectBytecode = _nanoShader.Effect.Bytecode,
+            RootSignature = _nanoShader.RootSignature,
+
+            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
+        };
+
+        // fill stencil pipeline state
+        var depthStencilState = new DepthStencilStateDescription
+        {
+            DepthBufferEnable = true,
+            StencilWriteMask = 0xff,
+            StencilMask = 0xff,
+
+            FrontFace = new DepthStencilStencilOpDescription
+            {
+                StencilFunction = CompareFunction.Always,
+                StencilFail = StencilOperation.Keep,
+                StencilDepthBufferFail = StencilOperation.Keep,
+                StencilPass = StencilOperation.Increment,
+            },
+
+            BackFace = new DepthStencilStencilOpDescription
+            {
+                StencilFunction = CompareFunction.Always,
+                StencilFail = StencilOperation.Keep,
+                StencilDepthBufferFail = StencilOperation.Keep,
+                StencilPass = StencilOperation.Decrement,
+            },
+        };
+
+        var fillStencilPipeline = new PipelineStateDescription
+        {
+            BlendState = BlendStates.NonPremultiplied,
+            RasterizerState = new RasterizerStateDescription
+            {
+                CullMode = CullMode.None,
+                DepthBias = 0,
+                FillMode = FillMode.Solid,
+                MultisampleAntiAliasLine = false,
+                ScissorTestEnable = true,
+                SlopeScaleDepthBias = 0,
+            },
+            PrimitiveType = PrimitiveType.TriangleList,
+            InputElements = _nanoVertLayout.CreateInputElements(),
+            DepthStencilState = depthStencilState,
+            EffectBytecode = _nanoShader.Effect.Bytecode,
+            RootSignature = _nanoShader.RootSignature,
+            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm),
+        };
+
+        // fille pipeline
+        var fillPipeline = modelPipeline;
+        fillPipeline.DepthStencilState = new DepthStencilStateDescription
+        {
+            DepthBufferEnable = true,
+            StencilWriteMask = 0xff,
+            StencilMask = 0xff,
+            FrontFace = new DepthStencilStencilOpDescription
+            {
+                StencilFunction = CompareFunction.NotEqual,
+                StencilFail = StencilOperation.Zero,
+                StencilDepthBufferFail = StencilOperation.Zero,
+                StencilPass = StencilOperation.Zero,
+            },
+        };
+
+        _pipelines.Add(DrawCommandType.FillStencil, PipelineState.New(GraphicsDevice, ref fillStencilPipeline));
+        _pipelines.Add(DrawCommandType.Fill, PipelineState.New(GraphicsDevice, ref fillPipeline));
+        _pipelines.Add(DrawCommandType.Triangles, PipelineState.New(GraphicsDevice, ref modelPipeline));
+    }
+
+    #endregion
 
     private void Window_ClientSizeChanged(object sender, EventArgs e)
     {
@@ -137,19 +206,19 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     public override void Update(GameTime gameTime)
     {
-        //_demo.Update((float)gameTime.Elapsed.TotalSeconds);
+        _demo.Update((float)gameTime.Elapsed.TotalSeconds);
     }
 
     public override void Draw(GameTime gameTime)
     {
         NvgContext.Instance.BeginFrame();
-        //_demo.Draw(NvgContext.Instance);
+        _demo.Draw(NvgContext.Instance);
         NvgContext.Instance.EndFrame();
     }
 
     protected override void Destroy()
     {
-        //_demo?.Dispose();
+        _demo?.Dispose();
         NvgContext.Instance?.Dispose();
     }
 
@@ -193,8 +262,12 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 previousDrawCommandType = drawCommand.DrawCommandType;
 
                 // must set new pipeline & uniform rs
-                //_commandList.SetPipeline(GetPipeline(drawCommand.DrawCommandType));
-                //_commandList.SetGraphicsResourceSet(0, _uniformBufferRS);
+                if (_pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline))
+                {
+                    _commandList.SetPipelineState(pipeline);
+                    //_commandList.SetGraphicsResourceSet(0, _uniformBufferRS);
+                }
+                else throw new Exception("Pipeline not found for " + drawCommand.DrawCommandType.ToString());
 
                 updateTextureRS = true;
             }
@@ -266,7 +339,11 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (!data.IsEmpty && _textures.TryGetValue(texture, out var tex))
         {
-            //UpdateTextureBytes(tex, data, Vector2.Zero, new Vector2(tex.Width, tex.Height));
+            var newTexture = Texture2D.New2D<byte>(GraphicsDevice,
+                tex.Width,
+                tex.Height,
+                PixelFormat.R8G8B8A8_UNorm,
+                usage: GraphicsResourceUsage.Dynamic, textureData: data.ToArray());
 
             return true;
         }
@@ -279,12 +356,7 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
         if (_textures.TryGetValue(texture, out var tex))
         {
             tex?.Dispose();
-
-            // try delete texture resourceset also
-            _log.Warning("Attempted to delete Texture. Make sure Stride cleans this up.");
-
             _textures.Remove(texture);
-
             return true;
         }
 
@@ -329,6 +401,7 @@ public class NanoUISystem : GameSystemBase, INvgRenderer, IService
         if (_textures.TryGetValue(texture, out var tex))
         {
             _log.Warning("UpdateTextureRegion is not implemented yet.");
+
 
             return true;
         }

@@ -1,0 +1,25 @@
+!SceneAsset
+Id: d1039173-3bfa-465f-92fd-06158a7888d3
+SerializedVersion: {Stride: 3.1.0.1}
+Tags: []
+ChildrenIds: []
+Offset: {X: 0.0, Y: 0.0, Z: 0.0}
+Hierarchy:
+    RootParts:
+        - ref!! 23df04e7-587c-45d6-ba65-c7e726beea89
+    Parts:
+        -   Entity:
+                Id: 23df04e7-587c-45d6-ba65-c7e726beea89
+                Name: Camera
+                Components:
+                    2ccb1cb34902e5bdecc64bc906740562: !TransformComponent
+                        Id: c0731219-06ec-43a8-a924-94bf3c81f26c
+                        Position: {X: 0.0, Y: 0.0, Z: 0.0}
+                        Rotation: {X: 0.0, Y: 0.0, Z: 0.0, W: 1.0}
+                        Scale: {X: 1.0, Y: 1.0, Z: 1.0}
+                        Children: {}
+                    364fbc5fa41aae8632f199e7cc26fc92: !CameraComponent
+                        Id: 597dc98a-78cd-4355-acc6-02526e37aa1a
+                        Name: null
+                        Projection: Perspective
+                        Slot: 96e0d80f-0be0-4288-8d2a-cee4238c9504

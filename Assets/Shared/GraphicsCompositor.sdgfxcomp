@@ -102,10 +102,11 @@ SharedRenderers:
 Game*: !Stride.Rendering.Compositing.SceneRendererCollection,Stride.Rendering
     Id: 43ea20ac-8049-4f15-8417-0c1880d78932
     Children:
-        9904c4a6b34b329085ddb1d4a21d41cf: !NanoUIDemo.CustomEffectRenderer,NanoUIDemo.Game
-            Id: ad8be9f5-ea45-41d2-9445-1dfe988b4629
-            Background: c66a4058-05dd-4be0-9e11-5780c5701e2b:StrideBackground
-            Logo: e898e0a7-15e4-4d76-8f3c-aee250925217:LogoStride
+        9904c4a6b34b329085ddb1d4a21d41cf: !Stride.Rendering.Compositing.SceneCameraRenderer,Stride.Engine
+            Id: d3ce8338-e4e0-45f0-b403-94dd8050192f
+            Camera: ref!! 96e0d80f-0be0-4288-8d2a-cee4238c9504
+            Child: !Stride.Rendering.Compositing.ForwardRenderer,Stride.Engine ref!! 4d409a59-d3c6-4b55-a5c7-4bd9b8886ea5
+            RenderMask: All
 SingleView: !Stride.Rendering.Compositing.ForwardRenderer,Stride.Engine ref!! 4d409a59-d3c6-4b55-a5c7-4bd9b8886ea5
 Editor: !Stride.Rendering.Compositing.ForwardRenderer,Stride.Engine ref!! 4d409a59-d3c6-4b55-a5c7-4bd9b8886ea5
 BlockPositions: {}

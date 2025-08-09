@@ -29,13 +29,12 @@
         float unused2;
     };
     
-    stream float2 pos : POSITION;    // vertex position
     stream float2 ftcoord    : TEXCOORD0;      // float 2 tex coord
     stream float2 fpos       : TEXCOORD1;      // float 2 position 
 
     override stage void VSMain() 
     {
-        streams.ShadingPosition = mul(proj, float4(streams.pos, 0.0, 1.0f)) + float4(-1.0f, 1.0f, 0.0f, 0.0f);
+        streams.ShadingPosition = mul(proj, float4(streams.fpos, 0.0, 1.0f)) + float4(-1.0f, 1.0f, 0.0f, 0.0f);
     }
 
     override stage void PSMain() 
