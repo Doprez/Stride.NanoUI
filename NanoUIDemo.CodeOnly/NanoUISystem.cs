@@ -17,7 +17,7 @@ using System.Collections.Generic;
 using System.IO;
 using Texture2D = Stride.Graphics.Texture;
 
-namespace NanoUIDemo;
+namespace NanoUIDemo.CodeOnly;
 
 public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 {
@@ -224,7 +224,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         // view proj
         var surfaceSize = Game.Window.ClientBounds;
-        var projMatrix = Stride.Core.Mathematics.Matrix.OrthoRH(surfaceSize.Width, -surfaceSize.Height, -1, 1);
+        var projMatrix = Matrix.OrthoRH(surfaceSize.Width, -surfaceSize.Height, -1, 1);
 
         // previous params
         DrawCommandType? previousDrawCommandType = null;
@@ -300,7 +300,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             }
         }
 
-        var textureData = Content.Load<Texture>(path);
+        var textureData = Content.Load<Texture2D>(path);
 
         int texture = CreateTexture(new TextureDesc((uint)textureData.Width, (uint)textureData.Height));
 
@@ -330,7 +330,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (!data.IsEmpty && _textures.TryGetValue(texture, out var tex))
         {
-            var newTexture = Texture2D.New2D<byte>(GraphicsDevice,
+            var newTexture = Texture2D.New2D(GraphicsDevice,
                 tex.Width,
                 tex.Height,
                 PixelFormat.R8G8B8A8_UNorm,

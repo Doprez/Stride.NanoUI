@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Stride.CommunityToolkit.Bullet" Version="1.0.0-preview.56" />
+    <PackageReference Include="Stride.CommunityToolkit.ImGui" Version="1.0.0-preview.56" />
+    <PackageReference Include="Stride.CommunityToolkit.Skyboxes" Version="1.0.0-preview.56" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\NanoUI\samples\NanoUIDemos\NanoUIDemos.csproj" />
+    <ProjectReference Include="..\..\NanoUI\source\NanoUI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Effects\NanoUIShader.sdsl.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Effects\NanoUIShader.sdsl">
+      <LastGenOutput>NanoUIShader.sdsl.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+
+</Project>
