@@ -270,7 +270,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     private void Window_ClientSizeChanged(object sender, EventArgs e)
     {
-        // TODO: handle window resize, if needed
+        // TODO: handle window resize, when needed
     }
 
     public override void Update(GameTime gameTime)
@@ -304,6 +304,12 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         var surfaceSize = Game.Window.ClientBounds;
         var projMatrix = Matrix.OrthoRH(surfaceSize.Width, -surfaceSize.Height, -1, 1);
 
+        UpdateIndexBuffer(DrawCache.Indexes);
+        UpdateVertexBuffer(DrawCache.Vertices);
+
+        _commandList.SetVertexBuffer(0, _vertexBinding.Buffer, 0, _nanoVertLayout.VertexStride);
+        _commandList.SetIndexBuffer(_indexBinding.Buffer, 0, false);
+
         // previous params
         DrawCommandType? previousDrawCommandType = null;
         bool updateTextureRS = true;
@@ -324,8 +330,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 uniformOffset = drawCommand.UniformOffset;
 
                 // update uniform buffer
-                _fragmentUniformBuffer.SetData(_graphicsContext.CommandList,
-                    ref newUniform);
+                _fragmentUniformBuffer.SetData(_graphicsContext.CommandList, ref newUniform);
                 //_commandList.UpdateBuffer(_fragmentUniformBuffer, 0, uniforms[drawCommand.UniformOffset]);
             }
 
@@ -335,24 +340,21 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 previousDrawCommandType = drawCommand.DrawCommandType;
 
                 // must set new pipeline & uniform rs
-                if (_pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline))
-                {
-                    _commandList.SetPipelineState(pipeline);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, newUniform.InnerCol);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, newUniform.OuterCol);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, newUniform.ScissorScale);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, newUniform.ScissorExt);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, newUniform.Extent);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.radius, newUniform.Radius);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
-                    _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
-                    //_commandList.SetGraphicsResourceSet(0, _uniformBufferRS);
-                }
-                // TODO: remove when brain is working good.
-                else throw new Exception("Pipeline not found for " + drawCommand.DrawCommandType.ToString());
+                _pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline);
+                _commandList.SetPipelineState(pipeline);
+
+                // set uniform data from NanoUI for the cbuffer object
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, (Vector4)newUniform.InnerCol);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, (Vector4)newUniform.OuterCol);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, (Vector2)newUniform.ScissorScale);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, (Vector2)newUniform.ScissorExt);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, (Vector2)newUniform.Extent);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.radius, newUniform.Radius);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
 
                 updateTextureRS = true;
             }
@@ -380,6 +382,31 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             // draw
             _commandList.DrawIndexed(drawCommand.IndexCount, drawCommand.IndexOffset, drawCommand.VertexOffset);
         }
+    }
+
+    void UpdateIndexBuffer(ReadOnlySpan<ushort> indices)
+    {
+        uint totalIBOSize = (uint)(indices.Length * sizeof(ushort));
+        if (totalIBOSize > _indexBinding.Buffer.SizeInBytes)
+        {
+            var is32Bits = false;
+            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 2f));
+            _indexBinding = new IndexBufferBinding(indexBuffer, is32Bits, 0);
+        }
+
+        _indexBinding.Buffer.SetData(_commandList, indices);
+    }
+
+    void UpdateVertexBuffer(ReadOnlySpan<Vertex> vertices)
+    {
+        uint totalVBOSize = (uint)(vertices.Length * Vertex.SizeInBytes);
+        if (totalVBOSize > _vertexBinding.Buffer.SizeInBytes)
+        {
+            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 2f));
+            _vertexBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
+        }
+
+        _vertexBinding.Buffer.SetData(_commandList, vertices);
     }
 
     public int CreateTexture(string path, NanoUI.Common.TextureFlags textureFlags = 0)
