@@ -83,8 +83,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
         _nanoVertLayout = new VertexDeclaration(
             VertexElement.Position<Vector2>(),
-            VertexElement.TextureCoordinate<Vector2>(),
-            VertexElement.Color(PixelFormat.R8G8B8A8_UNorm)
+            VertexElement.TextureCoordinate<Vector2>()
         );
 
         InitPipelineSates();
