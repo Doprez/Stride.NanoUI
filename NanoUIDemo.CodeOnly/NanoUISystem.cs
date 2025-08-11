@@ -81,12 +81,11 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
         _nanoShader.UpdateEffect(GraphicsDevice);
 
-        var layout = new VertexDeclaration(
+        _nanoVertLayout = new VertexDeclaration(
             VertexElement.Position<Vector2>(),
-            VertexElement.TextureCoordinate<Vector2>()
+            VertexElement.TextureCoordinate<Vector2>(),
+            VertexElement.Color(PixelFormat.R8G8B8A8_UNorm)
         );
-
-        _nanoVertLayout = layout;
 
         InitPipelineSates();
 
@@ -104,7 +103,13 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     void InitPipelineSates()
     {
-        // model pipeline
+        _pipelines.Add(DrawCommandType.Triangles, CreateModelPipeline());
+        _pipelines.Add(DrawCommandType.FillStencil, CreateFillStencilPipeline());
+        _pipelines.Add(DrawCommandType.Fill, CreateFillPipeline());
+    }
+
+    PipelineState CreateModelPipeline()
+    {
         var modelPipeline = new PipelineStateDescription()
         {
             BlendState = BlendStates.AlphaBlend,
@@ -129,63 +134,107 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
         };
 
-        // fill stencil pipeline
-        var depthStencilState = new DepthStencilStateDescription
-        {
-            DepthBufferEnable = true,
-            StencilWriteMask = 0xff,
-            StencilMask = 0xff,
+        return PipelineState.New(GraphicsDevice, ref modelPipeline);
+    }
 
-            FrontFace = new DepthStencilStencilOpDescription
+    PipelineState CreateFillStencilPipeline()
+    {
+        var fillStencilPipeline = new PipelineStateDescription()
+        {
+            BlendState = BlendStates.AlphaBlend,
+
+            RasterizerState = new RasterizerStateDescription()
             {
-                StencilFunction = CompareFunction.Always,
-                StencilFail = StencilOperation.Keep,
-                StencilDepthBufferFail = StencilOperation.Keep,
-                StencilPass = StencilOperation.Increment,
+                FillMode = FillMode.Solid,
+                CullMode = CullMode.Back,
+                FrontFaceCounterClockwise = true,
+                ScissorTestEnable = false,
+                DepthClipEnable = false,
             },
 
-            BackFace = new DepthStencilStencilOpDescription
+            DepthStencilState = new DepthStencilStateDescription
             {
-                StencilFunction = CompareFunction.Always,
-                StencilFail = StencilOperation.Keep,
-                StencilDepthBufferFail = StencilOperation.Keep,
-                StencilPass = StencilOperation.Decrement,
+                StencilEnable = true,
+                StencilMask = 0xff,
+                StencilWriteMask = 0xff,
+                
+                FrontFace = new DepthStencilStencilOpDescription
+                {
+                    StencilFunction = CompareFunction.Always,
+                    StencilFail = StencilOperation.Keep,
+                    StencilDepthBufferFail = StencilOperation.Keep,
+                    StencilPass = StencilOperation.Increment,
+                },
+
+                BackFace = new DepthStencilStencilOpDescription
+                {
+                    StencilFunction = CompareFunction.Always,
+                    StencilFail = StencilOperation.Keep,
+                    StencilDepthBufferFail = StencilOperation.Keep,
+                    StencilPass = StencilOperation.Decrement,
+                },
             },
+
+            PrimitiveType = PrimitiveType.TriangleList,
+            InputElements = _nanoVertLayout.CreateInputElements(),
+
+            EffectBytecode = _nanoShader.Effect.Bytecode,
+            RootSignature = _nanoShader.RootSignature,
+
+            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm),
         };
 
-        var fillStencilPipeline = modelPipeline;
+        return PipelineState.New(GraphicsDevice, ref fillStencilPipeline);
+    }
 
-        fillStencilPipeline.BlendState = BlendStates.ColorDisabled;
-        fillStencilPipeline.RasterizerState = new RasterizerStateDescription
+    PipelineState CreateFillPipeline()
+    {
+        var fillPipeline = new PipelineStateDescription()
         {
-            CullMode = CullMode.None,
-            DepthBias = 0,
-            FillMode = FillMode.Solid,
-            MultisampleAntiAliasLine = false,
-            ScissorTestEnable = true,
-            SlopeScaleDepthBias = 0,
-        };
-        fillStencilPipeline.DepthStencilState = depthStencilState;
+            BlendState = BlendStates.AlphaBlend,
 
-        // fill pipeline
-        var fillPipeline = modelPipeline;
-        fillPipeline.DepthStencilState = new DepthStencilStateDescription
-        {
-            DepthBufferEnable = true,
-            StencilWriteMask = 0xff,
-            StencilMask = 0xff,
-            FrontFace = new DepthStencilStencilOpDescription
+            RasterizerState = new RasterizerStateDescription()
             {
-                StencilFunction = CompareFunction.NotEqual,
-                StencilFail = StencilOperation.Zero,
-                StencilDepthBufferFail = StencilOperation.Zero,
-                StencilPass = StencilOperation.Zero,
+                FillMode = FillMode.Solid,
+                CullMode = CullMode.Back,
+                FrontFaceCounterClockwise = true,
+                ScissorTestEnable = false,
+                DepthClipEnable = false,
             },
+
+            DepthStencilState = new DepthStencilStateDescription
+            {
+                StencilEnable = true,
+                StencilMask = 0xff,
+                StencilWriteMask = 0xff,
+
+                FrontFace = new DepthStencilStencilOpDescription
+                {
+                    StencilFunction = CompareFunction.NotEqual,
+                    StencilFail = StencilOperation.Zero,
+                    StencilDepthBufferFail = StencilOperation.Zero,
+                    StencilPass = StencilOperation.Zero,
+                },
+
+                BackFace = new DepthStencilStencilOpDescription
+                {
+                    StencilFunction = CompareFunction.NotEqual,
+                    StencilFail = StencilOperation.Zero,
+                    StencilDepthBufferFail = StencilOperation.Zero,
+                    StencilPass = StencilOperation.Zero,
+                },
+            },
+
+            PrimitiveType = PrimitiveType.TriangleList,
+            InputElements = _nanoVertLayout.CreateInputElements(),
+
+            EffectBytecode = _nanoShader.Effect.Bytecode,
+            RootSignature = _nanoShader.RootSignature,
+
+            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
         };
 
-        _pipelines.Add(DrawCommandType.Triangles, PipelineState.New(GraphicsDevice, ref modelPipeline));
-        _pipelines.Add(DrawCommandType.FillStencil, PipelineState.New(GraphicsDevice, ref fillStencilPipeline));
-        _pipelines.Add(DrawCommandType.Fill, PipelineState.New(GraphicsDevice, ref fillPipeline));
+        return PipelineState.New(GraphicsDevice, ref fillPipeline);
     }
 
     #endregion
