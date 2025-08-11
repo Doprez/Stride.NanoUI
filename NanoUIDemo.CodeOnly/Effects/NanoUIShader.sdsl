@@ -10,23 +10,23 @@
         MaxAnisotropy = 16;
     };
 
-    cbuffer PS_CONSTANTS
+    cbuffer PS_CONSTANTS : register(b0, space3)
     {
-        float4x4 scissorMat;
-        float4x4 paintMat;
-        float4 innerCol;
-        float4 outerCol;
-        float2 scissorExt;
-        float2 scissorScale;
+        float4x4 scissorMat : packoffset(c0);
+        float4x4 paintMat : packoffset(c4);
+        float4 innerCol : packoffset(c8);
+        float4 outerCol : packoffset(c9);
+        float2 scissorExt : packoffset(c10);
+        float2 scissorScale : packoffset(c10.z);
         
-        float2 extent;
-        float radius;
-        float feather;
+        float2 extent : packoffset(c11);
+        float radius : packoffset(c11.z);
+        float feather : packoffset(c11.w);
         
-        float actionType;
-        float fontSize;
-        float unused1;
-        float unused2;
+        float actionType : packoffset(c12);
+        float fontSize : packoffset(c12.y);
+        float unused1 : packoffset(c12.z);
+        float unused2 : packoffset(c12.w);
     };
     
     stream float2 fpos       : POSITION;      // float 2 position 

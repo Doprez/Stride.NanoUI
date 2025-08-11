@@ -12,9 +12,6 @@ using Stride.Core.Serialization.Contents;
 using Stride.Games;
 using Stride.Graphics;
 using Stride.Rendering;
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Runtime.CompilerServices;
 using Texture2D = Stride.Graphics.Texture;
 
@@ -38,6 +35,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     private VertexDeclaration _nanoVertLayout;
     VertexBufferBinding _vertexBinding;
     IndexBufferBinding _indexBinding;
+    Stride.Graphics.Buffer _fragmentUniformBuffer;
+    Stride.Graphics.Buffer _transformBuffer;
     private EffectInstance _nanoShader;
     private Dictionary<DrawCommandType, PipelineState> _pipelines = new();
 
@@ -99,20 +98,20 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         var vertexBufferBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
         _vertexBinding = vertexBufferBinding;
 
-        //var transformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice,  
-        //    new BufferDescription
-        //    {
-        //        Usage = GraphicsResourceUsage.Dynamic,
-        //        SizeInBytes = Unsafe.SizeOf<Matrix>(),
-        //    });
-        //
-        //
-        //var fragmentUniformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice, 
-        //    new BufferDescription
-        //    {
-        //        Usage = GraphicsResourceUsage.Dynamic,
-        //        SizeInBytes = Unsafe.SizeOf<FragmentUniform>(),
-        //    });
+        _transformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice,  
+            new BufferDescription
+            {
+                Usage = GraphicsResourceUsage.Default,
+                SizeInBytes = Unsafe.SizeOf<Matrix>(),
+            });
+        
+        
+        _fragmentUniformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice, 
+            new BufferDescription
+            {
+                Usage = GraphicsResourceUsage.Default,
+                SizeInBytes = Unsafe.SizeOf<FragmentUniform>(),
+            });
     }
 
     void InitNullTexture()
@@ -318,11 +317,15 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         foreach (var drawCommand in DrawCache.DrawCommands)
         {
             // uniform buffer
+            var newUniform = uniforms[drawCommand.UniformOffset];
+
             if (uniformOffset != drawCommand.UniformOffset)
             {
                 uniformOffset = drawCommand.UniformOffset;
 
                 // update uniform buffer
+                _fragmentUniformBuffer.SetData(_graphicsContext.CommandList,
+                    ref newUniform);
                 //_commandList.UpdateBuffer(_fragmentUniformBuffer, 0, uniforms[drawCommand.UniformOffset]);
             }
 
@@ -335,8 +338,20 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 if (_pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline))
                 {
                     _commandList.SetPipelineState(pipeline);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, newUniform.InnerCol);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, newUniform.OuterCol);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, newUniform.ScissorScale);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, newUniform.ScissorExt);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, newUniform.Extent);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.radius, newUniform.Radius);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
+                    _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
                     //_commandList.SetGraphicsResourceSet(0, _uniformBufferRS);
                 }
+                // TODO: remove when brain is working good.
                 else throw new Exception("Pipeline not found for " + drawCommand.DrawCommandType.ToString());
 
                 updateTextureRS = true;
