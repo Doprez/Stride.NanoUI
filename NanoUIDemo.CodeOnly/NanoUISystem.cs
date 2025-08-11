@@ -172,7 +172,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         var fillStencilPipeline = new PipelineStateDescription()
         {
-            BlendState = BlendStates.AlphaBlend,
+            BlendState = BlendStates.ColorDisabled,
 
             RasterizerState = new RasterizerStateDescription()
             {
@@ -390,7 +390,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         if (totalIBOSize > _indexBinding.Buffer.SizeInBytes)
         {
             var is32Bits = false;
-            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 2f));
+            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 1.5f));
             _indexBinding = new IndexBufferBinding(indexBuffer, is32Bits, 0);
         }
 
@@ -402,7 +402,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         uint totalVBOSize = (uint)(vertices.Length * Vertex.SizeInBytes);
         if (totalVBOSize > _vertexBinding.Buffer.SizeInBytes)
         {
-            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 2f));
+            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 1.5f));
             _vertexBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
         }
 
