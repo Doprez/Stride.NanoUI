@@ -180,8 +180,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
             EffectBytecode = _nanoShader.Effect.Bytecode,
             RootSignature = _nanoShader.RootSignature,
-
-            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm),
         };
 
         return PipelineState.New(GraphicsDevice, ref fillStencilPipeline);
