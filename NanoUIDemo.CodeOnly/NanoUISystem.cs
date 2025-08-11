@@ -15,6 +15,7 @@ using Stride.Rendering;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Texture2D = Stride.Graphics.Texture;
 
 namespace NanoUIDemo.CodeOnly;
@@ -87,6 +88,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         );
 
         InitPipelineSates();
+        InitNullTexture();
 
         var is32Bits = false;
         var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, INITIAL_INDEX_BUFFER_SIZE * sizeof(ushort), GraphicsResourceUsage.Dynamic);
@@ -96,6 +98,37 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, INITIAL_VERTEX_BUFFER_SIZE * _nanoVertLayout.CalculateSize(), GraphicsResourceUsage.Dynamic);
         var vertexBufferBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
         _vertexBinding = vertexBufferBinding;
+
+        //var transformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice,  
+        //    new BufferDescription
+        //    {
+        //        Usage = GraphicsResourceUsage.Dynamic,
+        //        SizeInBytes = Unsafe.SizeOf<Matrix>(),
+        //    });
+        //
+        //
+        //var fragmentUniformBuffer = Stride.Graphics.Buffer.New(GraphicsDevice, 
+        //    new BufferDescription
+        //    {
+        //        Usage = GraphicsResourceUsage.Dynamic,
+        //        SizeInBytes = Unsafe.SizeOf<FragmentUniform>(),
+        //    });
+    }
+
+    void InitNullTexture()
+    {
+        var color = Color4.White;
+        byte[] colorBytes = new byte[]
+        {
+            (byte)(color.R * 255),
+            (byte)(color.G * 255),
+            (byte)(color.B * 255),
+            (byte)(color.A * 255)
+        };
+        // create a null texture (for default texture)
+        var nullTexture = Texture2D.New2D(GraphicsDevice, 1, 1, PixelFormat.R8G8B8A8_UNorm, usage: GraphicsResourceUsage.Default, 
+            textureData: colorBytes);
+        _textures.Add(-1, nullTexture);
     }
 
     #region PipelineStates
@@ -361,7 +394,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             (int)description.Width,
             (int)description.Height, 
             PixelFormat.R8G8B8A8_UNorm, 
-            usage: GraphicsResourceUsage.Dynamic);
+            usage: GraphicsResourceUsage.Default);
 
         // note: id is 1-based (not 0-based), since then we can neglect texture (int) value when
         // serializing theme/ui to file & have all properties with texture as default (= 0)
@@ -380,7 +413,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 tex.Width,
                 tex.Height,
                 PixelFormat.R8G8B8A8_UNorm,
-                usage: GraphicsResourceUsage.Dynamic, textureData: data.ToArray());
+                usage: GraphicsResourceUsage.Default, textureData: data.ToArray());
 
             return true;
         }
@@ -437,8 +470,15 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (_textures.TryGetValue(texture, out var tex))
         {
-            _log.Warning("UpdateTextureRegion is not implemented yet.");
-
+            //_log.Warning("UpdateTextureRegion is not implemented yet.");
+            tex.SetData(_graphicsContext.CommandList, allData.ToArray(), 
+                region: new ResourceRegion
+                {
+                    Right = (int)regionRect.Z,
+                    Bottom = (int)regionRect.W,
+                    Left = (int)regionRect.X,
+                    Top = (int)regionRect.Y
+                });
 
             return true;
         }
