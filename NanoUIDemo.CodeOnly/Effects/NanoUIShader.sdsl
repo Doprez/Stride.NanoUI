@@ -1,5 +1,4 @@
-﻿
-shader NanoUIShader : ShaderBase 
+﻿shader NanoUIShader : ShaderBase 
 {
     matrix proj;
     stage Texture2D tex;
@@ -26,69 +25,16 @@ shader NanoUIShader : ShaderBase
         
         float actionType;
         float fontSize;
-        float unused1;
+        float unused1; // used as debug flag when > 0.5f
         float unused2;
     };
     
     stream float2 fpos       : POSITION;      // float 2 position 
-    stream float2 ftcoord    : TEXCOORD0;     // float 2 tex coord
+    stream float2 ftcoord    : TEXCOORD0;     // float 2 tex coord (normalized)
 
     override stage void VSMain() 
     {
-        // Stride: column-major, use mul(vector, matrix)
         streams.ShadingPosition = mul(float4(streams.fpos, 0.0, 1.0f), proj);
-    }
-
-    override stage void PSMain() 
-    {
-        float4 result;
-        float scissor = scissorMask(streams.fpos);
-        float strokeAlpha = 1.0f;
-
-        if (actionType == 0) 
-        {
-            // Gradient fill
-            float2 pt = (mul(float4(streams.fpos,0,1.0), paintMat)).xy;
-            float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-            float4 color = lerp(innerCol, outerCol, d);
-            color *= strokeAlpha * scissor;
-            result = color;
-        }
-        else if (actionType == 1)
-        {
-            // Image fill (premultiplied)
-            float2 pt = (mul(float4(streams.fpos,0,1.0), paintMat)).xy / extent;
-            float4 color = tex.Sample(TexSampler, pt);
-            color = float4(color.xyz*color.w,color.w);
-            if(innerCol.r != 0 || innerCol.g != 0 || innerCol.b != 0 || innerCol.a != 0)
-            {
-                color *= innerCol;
-            }
-            color *= strokeAlpha * scissor;
-            result = color;
-        }
-        else if (actionType == 2)
-        {
-            // Stencil fill (color ignored by pipeline)
-            result = float4(1,1,1,1);
-        } 
-        else if (actionType == 3)
-        {
-            // Normal text (font atlas in R)
-            float col = tex.Sample(TexSampler, streams.ftcoord).x;
-            float4 color = float4(col, col, col, col);
-            color *= scissor;
-            result = (color * innerCol);
-        }
-        else // actionType == 4 (SDF text)
-        {
-            float distance = tex.Sample(TexSampler, streams.ftcoord).x;
-            float weight = 0.5;
-            float smoothing = clamp(4.0 / fontSize, 0.0, 0.5);
-            float alpha = smoothstep(weight - smoothing, weight + smoothing, distance);
-            result = float4(innerCol.xyz, innerCol.w * alpha) * scissor;
-        }
-        streams.ColorTarget = result;
     }
 
     float sdroundrect(float2 pt, float2 ext, float rad) 
@@ -98,11 +44,77 @@ shader NanoUIShader : ShaderBase
         return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
     }
     
-    // Scissoring
     float scissorMask(float2 p) 
     {
-        float2 sc = (abs((mul(float4(p.x, p.y,0, 1.0), scissorMat)).xy) - scissorExt);
+        float2 sc = (abs(mul(float4(p,0, 1.0), scissorMat).xy) - scissorExt);
         sc = float2(0.5,0.5) - sc * scissorScale;
-        return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
+        return saturate(sc.x) * saturate(sc.y);
+    }
+
+    override stage void PSMain() 
+    {
+        bool debug = (unused1 > 0.5f);
+
+        float4 result;
+        float scissor = debug ? 1.0 : scissorMask(streams.fpos);
+        float strokeAlpha = 1.0f;
+
+        if (actionType == 0) 
+        {
+            float2 pt = mul(float4(streams.fpos,0,1.0), paintMat).xy;
+            float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
+            float4 color = lerp(innerCol, outerCol, d);
+            color *= strokeAlpha * scissor;
+            result = color;
+        }
+        else if (actionType == 1)
+        {
+            float2 pt = mul(float4(streams.fpos,0,1.0), paintMat).xy / max(extent, 1e-6);
+            float4 color = tex.Sample(TexSampler, pt);
+            color = float4(color.rgb * color.a, color.a);
+            if(any(innerCol))
+            {
+                color *= innerCol;
+            }
+            color *= strokeAlpha * scissor;
+            result = color;
+        }
+        else if (actionType == 2)
+        {
+            result = float4(1,1,1,1);
+        } 
+        else if (actionType == 3)
+        {
+            float a = tex.Sample(TexSampler, streams.ftcoord).r;
+            if (debug)
+            {
+                result = float4(a, a, a, 1.0) * scissor; // visualize sampled alpha
+            }
+            else
+            {
+                // innerCol is already premultiplied by global alpha on CPU; modulate by coverage only
+                float3 rgb = innerCol.rgb * a;
+                float alpha = innerCol.a * a;
+                result = float4(rgb, alpha) * scissor;
+            }
+        }
+        else // actionType == 4 (SDF)
+        {
+            float distance = tex.Sample(TexSampler, streams.ftcoord).r;
+            if (debug)
+            {
+                result = float4(distance, distance, distance, 1.0) * scissor; // visualize SDF distance
+            }
+            else
+            {
+                float weight = 0.5;
+                float smoothing = clamp(4.0 / max(fontSize, 0.0001), 0.0, 0.5);
+                float coverage = smoothstep(weight - smoothing, weight + smoothing, distance);
+                float3 rgb = innerCol.rgb * coverage;
+                float alpha = innerCol.a * coverage;
+                result = float4(rgb, alpha) * scissor;
+            }
+        }
+        streams.ColorTarget = result;
     }
 };

@@ -67,6 +67,14 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
         _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
 
+        // Make UI screen transparent so the 3D scene shows through
+        if (_demo?.Screen != null)
+        {
+            _demo.Screen.BackgroundUnfocused = null;
+            _demo.Screen.BackgroundFocused = null;
+            _demo.Screen.BackgroundPushed = null;
+        }
+
         // vbos etc
         CreateDeviceObjects();
     }
@@ -79,8 +87,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // compile the shader
         _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
         _nanoShader.UpdateEffect(GraphicsDevice);
-        // UI sampler: clamp + linear
-        _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.LinearClamp);
+        // UI sampler: prefer point sampling for crisp glyph atlas
+        _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.PointClamp);
 
         _nanoVertLayout = new VertexDeclaration(
             VertexElement.Position<Vector2>(),
@@ -291,13 +299,13 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     void DoRender()
     {
         // view proj (top-left origin)
-        var surfaceSize = Game.Window.ClientBounds;
+        var surfaceSize = GraphicsDevice.Presenter.BackBuffer.Size;
         var projMatrix = Matrix.OrthoOffCenterRH(0, surfaceSize.Width, surfaceSize.Height, 0, -1, 1);
 
-        // Do not clear color: let Stride scene show through. Only clear stencil (we use it)
+        // Clear only stencil: UI uses it for masking
         if (_commandList.DepthStencilBuffer != null)
         {
-            //_commandList.Clear(_commandList.DepthStencilBuffer, DepthStencilClearOptions.Stencil);
+            _commandList.Clear(_commandList.DepthStencilBuffer, DepthStencilClearOptions.Stencil);
         }
 
         UpdateIndexBuffer(DrawCache.Indexes);
@@ -315,16 +323,62 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // get uniforms once
         ReadOnlySpan<FragmentUniform> uniforms = DrawCache.Uniforms;
 
+        int textDraws = 0;
+        int textTris = 0;
+
         // loop draw commands
         foreach (var drawCommand in DrawCache.DrawCommands)
         {
-            // uniform buffer
+            if (drawCommand.DrawCallType == DrawCallType.Text)
+            {
+                textDraws++;
+                textTris += drawCommand.IndexCount / 3;
+            }
+            // Debug: dump a few UVs for text draws to verify ftcoord range
+            if (drawCommand.DrawCallType == DrawCallType.Text)
+            {
+                try
+                {
+                    var indices = DrawCache.Indexes;
+                    var vertices = DrawCache.Vertices;
+                    int start = drawCommand.IndexOffset;
+                    int end = start + Math.Min(drawCommand.IndexCount, 18); // sample first 6 tris
+
+                    float minU = float.MaxValue, minV = float.MaxValue;
+                    float maxU = float.MinValue, maxV = float.MinValue;
+                    float minX = float.MaxValue, minY = float.MaxValue;
+                    float maxX = float.MinValue, maxY = float.MinValue;
+
+                    for (int i = start; i < end; i++)
+                    {
+                        int vi = drawCommand.VertexOffset + indices[i];
+                        if ((uint)vi >= (uint)vertices.Length) break;
+                        var uv = vertices[vi].UV;
+                        var pos = vertices[vi].Position;
+                        if (uv.X < minU) minU = uv.X; if (uv.Y < minV) minV = uv.Y;
+                        if (uv.X > maxU) maxU = uv.X; if (uv.Y > maxV) maxV = uv.Y;
+                        if (pos.X < minX) minX = pos.X; if (pos.Y < minY) minY = pos.Y;
+                        if (pos.X > maxX) maxX = pos.X; if (pos.Y > maxY) maxY = pos.Y;
+                    }
+
+                    Console.WriteLine($"Text UV range: U[{minU:F3},{maxU:F3}] V[{minV:F3},{maxV:F3}]  (tex {drawCommand.Texture}, baseV {drawCommand.VertexOffset}, idxCount {drawCommand.IndexCount})");
+                    Console.WriteLine($"Text POS range: X[{minX:F1},{maxX:F1}] Y[{minY:F1},{maxY:F1}]");
+                }
+                catch { /* ignore debug errors */ }
+            }
+
+            // Uniforms
             if (uniformOffset != drawCommand.UniformOffset)
             {
                 uniformOffset = drawCommand.UniformOffset;
                 var newUniform = uniforms[drawCommand.UniformOffset];
 
-                // set uniform data from NanoUI for the cbuffer object
+                var scissorM = (Matrix)newUniform.ScissorMat;
+                var paintM = (Matrix)newUniform.PaintMat;
+
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, scissorM);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, paintM);
+                // Use matrices directly; Stride Matrix <-> Numerics handles layout
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, (Vector4)newUniform.InnerCol);
@@ -336,45 +390,46 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
+                // Disable shader debug visualization (use normal rendering paths)
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.unused1, 0.0f);
             }
 
-            // pipeline
+            // Pipeline
             if (previousDrawCommandType != drawCommand.DrawCommandType)
             {
                 previousDrawCommandType = drawCommand.DrawCommandType;
-
-                // must set new pipeline
-                _pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline);
+                if (!_pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline) || pipeline == null)
+                {
+                    // fallback to model pipeline if specific one not found
+                    _pipelines.TryGetValue(DrawCommandType.Triangles, out pipeline);
+                }
                 _commandList.SetPipelineState(pipeline);
-
-                updateTextureRS = true;
-            }
-            else if (previousTexture != drawCommand.Texture)
-            {
-                // texture changed
                 updateTextureRS = true;
             }
 
-            // texture resourceset
-            if (updateTextureRS)
+            // Texture
+            if (updateTextureRS || previousTexture != drawCommand.Texture)
             {
                 previousTexture = drawCommand.Texture;
-
-                Texture2D textureResource;
-                if (!_textures.TryGetValue(drawCommand.Texture, out textureResource))
+                if (!_textures.TryGetValue(drawCommand.Texture, out var textureResource))
                     textureResource = _textures[-1]; // fallback to white
-
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.tex, textureResource);
-
                 updateTextureRS = false;
             }
 
-            // Set the projection matrix and apply shader
+            // Proj + draw
             _nanoShader.Parameters.Set(NanoUIShaderKeys.proj, ref projMatrix);
             _nanoShader.Apply(_graphicsContext);
-
-            // draw
             _commandList.DrawIndexed(drawCommand.IndexCount, drawCommand.IndexOffset, drawCommand.VertexOffset);
+        }
+
+        if (textDraws == 0)
+        {
+            Console.WriteLine("No text draw commands issued this frame.");
+        }
+        else
+        {
+            Console.WriteLine($"Text draws: {textDraws}, approx tris: {textTris}");
         }
     }
 
@@ -408,9 +463,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         return format switch
         {
             TextureFormat.R => PixelFormat.R8_UNorm,
-            // Stride might not expose packed RG/RGB formats; map to RGBA for safety
-            TextureFormat.RG => PixelFormat.R8G8B8A8_UNorm,
-            TextureFormat.RGB => PixelFormat.R8G8B8A8_UNorm,
+            TextureFormat.RG => PixelFormat.R8G8_UNorm,
+            TextureFormat.RGB => PixelFormat.R8G8B8A8_UNorm, // fallback (Stride lacks 24-bit)
             TextureFormat.RGBA => PixelFormat.R8G8B8A8_UNorm,
             _ => PixelFormat.R8G8B8A8_UNorm,
         };
@@ -443,11 +497,10 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             }
         }
 
-        int texture = CreateTexture(new TextureDesc((uint)textureData.Width, (uint)textureData.Height));
-
-        UpdateTexture(texture, textureData.GetData<byte>(_graphicsContext.CommandList));
-
-        return texture;
+        // Keep the texture as-is to preserve channel order and format
+        counter++;
+        _textures.Add(counter, textureData);
+        return counter;
     }
 
     public int CreateTexture(TextureDesc description)
@@ -460,12 +513,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             pixelFormat, 
             usage: GraphicsResourceUsage.Default);
 
-        // note: id is 1-based (not 0-based), since then we can neglect texture (int) value when
-        // serializing theme/ui to file & have all properties with texture as default (= 0)
         counter++;
-
         _textures.Add(counter, texture);
-
         return counter;
     }
 
@@ -473,10 +522,10 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (!data.IsEmpty && _textures.TryGetValue(texture, out var tex))
         {
+            // If atlas is R8_UNorm, stride expects width*height bytes
             tex.SetData(_graphicsContext.CommandList, data.ToArray());
             return true;
         }
-
         return false;
     }
 
@@ -484,6 +533,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (_textures.TryGetValue(texture, out var tex))
         {
+            // If the texture is managed by Content, disposing it is optional. For safety in demo, just remove.
             tex?.Dispose();
             _textures.Remove(texture);
             return true;

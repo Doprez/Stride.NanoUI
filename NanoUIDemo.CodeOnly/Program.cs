@@ -18,8 +18,8 @@ void Start(Scene scene)
 
     game.AddSkybox();
 
-    var gamedateTime = game.Services.GetOrCreate<NanoUISystem>();
-    game.GameSystems.Add(gamedateTime);
+    var ui = game.Services.GetOrCreate<NanoUISystem>();
+    game.GameSystems.Add(ui);
 
     // makes the profiling much easier to read.
     game.SetMaxFPS(60);
