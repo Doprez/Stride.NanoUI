@@ -23,6 +23,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     const int INITIAL_VERTEX_BUFFER_SIZE = 128;
     const int INITIAL_INDEX_BUFFER_SIZE = 128;
 
+    public bool RenderDebug { get; set; } = true;
+
     // mapping texture ids & textures
     readonly Dictionary<int, Texture2D> _textures = [];
     private int counter = 0;
@@ -67,6 +69,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
         _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
 
+#warning Clean up with a custom base Stride page later.
         // Make UI screen transparent so the 3D scene shows through
         if (_demo?.Screen != null)
         {
@@ -323,62 +326,17 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // get uniforms once
         ReadOnlySpan<FragmentUniform> uniforms = DrawCache.Uniforms;
 
-        int textDraws = 0;
-        int textTris = 0;
+        float debugTextDraw = RenderDebug ? 1f : 0f;
 
         // loop draw commands
         foreach (var drawCommand in DrawCache.DrawCommands)
         {
-            if (drawCommand.DrawCallType == DrawCallType.Text)
-            {
-                textDraws++;
-                textTris += drawCommand.IndexCount / 3;
-            }
-            // Debug: dump a few UVs for text draws to verify ftcoord range
-            if (drawCommand.DrawCallType == DrawCallType.Text)
-            {
-                try
-                {
-                    var indices = DrawCache.Indexes;
-                    var vertices = DrawCache.Vertices;
-                    int start = drawCommand.IndexOffset;
-                    int end = start + Math.Min(drawCommand.IndexCount, 18); // sample first 6 tris
-
-                    float minU = float.MaxValue, minV = float.MaxValue;
-                    float maxU = float.MinValue, maxV = float.MinValue;
-                    float minX = float.MaxValue, minY = float.MaxValue;
-                    float maxX = float.MinValue, maxY = float.MinValue;
-
-                    for (int i = start; i < end; i++)
-                    {
-                        int vi = drawCommand.VertexOffset + indices[i];
-                        if ((uint)vi >= (uint)vertices.Length) break;
-                        var uv = vertices[vi].UV;
-                        var pos = vertices[vi].Position;
-                        if (uv.X < minU) minU = uv.X; if (uv.Y < minV) minV = uv.Y;
-                        if (uv.X > maxU) maxU = uv.X; if (uv.Y > maxV) maxV = uv.Y;
-                        if (pos.X < minX) minX = pos.X; if (pos.Y < minY) minY = pos.Y;
-                        if (pos.X > maxX) maxX = pos.X; if (pos.Y > maxY) maxY = pos.Y;
-                    }
-
-                    Console.WriteLine($"Text UV range: U[{minU:F3},{maxU:F3}] V[{minV:F3},{maxV:F3}]  (tex {drawCommand.Texture}, baseV {drawCommand.VertexOffset}, idxCount {drawCommand.IndexCount})");
-                    Console.WriteLine($"Text POS range: X[{minX:F1},{maxX:F1}] Y[{minY:F1},{maxY:F1}]");
-                }
-                catch { /* ignore debug errors */ }
-            }
-
             // Uniforms
             if (uniformOffset != drawCommand.UniformOffset)
             {
                 uniformOffset = drawCommand.UniformOffset;
                 var newUniform = uniforms[drawCommand.UniformOffset];
 
-                var scissorM = (Matrix)newUniform.ScissorMat;
-                var paintM = (Matrix)newUniform.PaintMat;
-
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, scissorM);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, paintM);
-                // Use matrices directly; Stride Matrix <-> Numerics handles layout
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, (Vector4)newUniform.InnerCol);
@@ -390,8 +348,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
-                // Disable shader debug visualization (use normal rendering paths)
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.unused1, 0.0f);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.unused1, debugTextDraw);
             }
 
             // Pipeline
@@ -412,7 +369,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             {
                 previousTexture = drawCommand.Texture;
                 if (!_textures.TryGetValue(drawCommand.Texture, out var textureResource))
-                    textureResource = _textures[-1]; // fallback to white
+                    textureResource = _textures[-1];
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.tex, textureResource);
                 updateTextureRS = false;
             }
@@ -421,15 +378,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             _nanoShader.Parameters.Set(NanoUIShaderKeys.proj, ref projMatrix);
             _nanoShader.Apply(_graphicsContext);
             _commandList.DrawIndexed(drawCommand.IndexCount, drawCommand.IndexOffset, drawCommand.VertexOffset);
-        }
-
-        if (textDraws == 0)
-        {
-            Console.WriteLine("No text draw commands issued this frame.");
-        }
-        else
-        {
-            Console.WriteLine($"Text draws: {textDraws}, approx tris: {textTris}");
         }
     }
 
