@@ -4,10 +4,10 @@
     stage Texture2D tex;
 
     SamplerState TexSampler {
-        Filter = MIN_MAG_MIP_LINEAR;
-        AddressU = Clamp;
-        AddressV = Clamp;
-        MaxAnisotropy = 1;
+        Filter = ANISOTROPIC;
+        AddressU = Wrap;
+        AddressV = Wrap;
+        MaxAnisotropy = 16;
     };
 
     cbuffer PS_CONSTANTS
@@ -92,7 +92,6 @@
             }
             else
             {
-                // innerCol is already premultiplied by global alpha on CPU; modulate by coverage only
                 float3 rgb = innerCol.rgb * a;
                 float alpha = innerCol.a * a;
                 result = float4(rgb, alpha) * scissor;

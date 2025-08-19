@@ -12,7 +12,6 @@ using Stride.Core.Serialization.Contents;
 using Stride.Games;
 using Stride.Graphics;
 using Stride.Rendering;
-using System.Runtime.CompilerServices;
 using Texture2D = Stride.Graphics.Texture;
 
 namespace NanoUIDemo.CodeOnly;
@@ -73,9 +72,9 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // Make UI screen transparent so the 3D scene shows through
         if (_demo?.Screen != null)
         {
-            _demo.Screen.BackgroundUnfocused = null;
-            _demo.Screen.BackgroundFocused = null;
-            _demo.Screen.BackgroundPushed = null;
+            _demo.Screen.BackgroundUnfocused = new SolidBrush(NanoUI.Common.Color.Transparent);
+            _demo.Screen.BackgroundFocused = new SolidBrush(NanoUI.Common.Color.Transparent);
+            _demo.Screen.BackgroundPushed = new SolidBrush(NanoUI.Common.Color.Transparent);
         }
 
         // vbos etc
@@ -90,7 +89,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // compile the shader
         _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
         _nanoShader.UpdateEffect(GraphicsDevice);
-        // UI sampler: prefer point sampling for crisp glyph atlas
         _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.PointClamp);
 
         _nanoVertLayout = new VertexDeclaration(
@@ -210,7 +208,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             EffectBytecode = _nanoShader.Effect.Bytecode,
             RootSignature = _nanoShader.RootSignature,
 
-            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
+            //Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
         };
 
         return PipelineState.New(GraphicsDevice, ref fillStencilPipeline);
@@ -305,10 +303,9 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         var surfaceSize = GraphicsDevice.Presenter.BackBuffer.Size;
         var projMatrix = Matrix.OrthoOffCenterRH(0, surfaceSize.Width, surfaceSize.Height, 0, -1, 1);
 
-        // Clear only stencil: UI uses it for masking
         if (_commandList.DepthStencilBuffer != null)
         {
-            _commandList.Clear(_commandList.DepthStencilBuffer, DepthStencilClearOptions.Stencil);
+            //_commandList.Clear(_commandList.DepthStencilBuffer, DepthStencilClearOptions.Stencil);
         }
 
         UpdateIndexBuffer(DrawCache.Indexes);
@@ -337,13 +334,13 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 uniformOffset = drawCommand.UniformOffset;
                 var newUniform = uniforms[drawCommand.UniformOffset];
 
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, (Vector4)newUniform.InnerCol);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, (Vector4)newUniform.OuterCol);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, (Vector2)newUniform.ScissorScale);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, (Vector2)newUniform.ScissorExt);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, (Vector2)newUniform.Extent);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, newUniform.ScissorMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, newUniform.PaintMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, newUniform.InnerCol);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, newUniform.OuterCol);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, newUniform.ScissorScale);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, newUniform.ScissorExt);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, newUniform.Extent);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.radius, newUniform.Radius);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
@@ -422,27 +419,19 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         Texture2D textureData = null;
 
-        // Try load from content first (asset might already exist)
-        try
+        // If not in content, try to import from file system
+        if (File.Exists(path))
         {
+            using (Stream stream = File.OpenRead(path))
+            {
+                var localTexture = Image.Load(stream);
+                ((ContentManager)Content).Save(path, localTexture);
+            }
             textureData = Content.Load<Texture2D>(path);
         }
-        catch
+        else
         {
-            // If not in content, try to import from file system
-            if (File.Exists(path))
-            {
-                using (Stream stream = File.OpenRead(path))
-                {
-                    var localTexture = Image.Load(stream);
-                    ((ContentManager)Content).Save(path, localTexture);
-                }
-                textureData = Content.Load<Texture2D>(path);
-            }
-            else
-            {
-                return -1; // invalid texture id
-            }
+            return -1; // invalid texture id
         }
 
         // Keep the texture as-is to preserve channel order and format
