@@ -45,7 +45,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     // DemoTypes:
     // Docking, Drawing, SDFText, SvgShapes, TextShapes, UIBasic, UIExtended, UIExtended2,
     // UIExperimental, UILayouts
-    static DemoType _demoType = DemoType.UIBasic;
+    static DemoType _demoType = DemoType.UILayouts;
     static DemoBase _demo;
 
     public NanoUISystem([NotNull] IServiceRegistry registry) : base(registry)
@@ -138,7 +138,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         var modelPipeline = new PipelineStateDescription()
         {
-            BlendState = BlendStates.AlphaBlend,
+            BlendState = BlendStates.NonPremultiplied,
 
             RasterizerState = new RasterizerStateDescription()
             {
@@ -218,7 +218,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         var fillPipeline = new PipelineStateDescription()
         {
-            BlendState = BlendStates.AlphaBlend,
+            BlendState = BlendStates.NonPremultiplied,
 
             RasterizerState = new RasterizerStateDescription()
             {
@@ -302,11 +302,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // view proj (top-left origin)
         var surfaceSize = GraphicsDevice.Presenter.BackBuffer.Size;
         var projMatrix = Matrix.OrthoOffCenterRH(0, surfaceSize.Width, surfaceSize.Height, 0, -1, 1);
-
-        if (_commandList.DepthStencilBuffer != null)
-        {
-            //_commandList.Clear(_commandList.DepthStencilBuffer, DepthStencilClearOptions.Stencil);
-        }
 
         UpdateIndexBuffer(DrawCache.Indexes);
         UpdateVertexBuffer(DrawCache.Vertices);
@@ -409,7 +404,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         {
             TextureFormat.R => PixelFormat.R8_UNorm,
             TextureFormat.RG => PixelFormat.R8G8_UNorm,
-            TextureFormat.RGB => PixelFormat.R8G8B8A8_UNorm, // fallback (Stride lacks 24-bit)
             TextureFormat.RGBA => PixelFormat.R8G8B8A8_UNorm,
             _ => PixelFormat.R8G8B8A8_UNorm,
         };
