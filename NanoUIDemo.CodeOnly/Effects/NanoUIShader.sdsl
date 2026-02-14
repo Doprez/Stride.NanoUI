@@ -53,10 +53,8 @@
 
     override stage void PSMain() 
     {
-        bool debug = (unused1 > 0.5f);
-
         float4 result;
-        float scissor = debug ? 1.0 : scissorMask(streams.fpos);
+        float scissor = scissorMask(streams.fpos);
         float strokeAlpha = 1.0f;
 
         if (actionType == 0) 
@@ -85,34 +83,20 @@
         } 
         else if (actionType == 3)
         {
-            float a = tex.Sample(TexSampler, streams.ftcoord).r;
-            if (debug)
-            {
-                result = float4(a, a, a, 1.0) * scissor; // visualize sampled alpha
-            }
-            else
-            {
-                float3 rgb = innerCol.rgb * a;
-                float alpha = innerCol.a * a;
-                result = float4(rgb, alpha) * scissor;
-            }
+            float r = tex.Sample(TexSampler, streams.ftcoord).r;
+            float3 rgb = innerCol.rgb * r;
+            float alpha = innerCol.a * r;
+            result = float4(rgb, alpha) * scissor;
         }
         else // actionType == 4 (SDF)
         {
             float distance = tex.Sample(TexSampler, streams.ftcoord).r;
-            if (debug)
-            {
-                result = float4(distance, distance, distance, 1.0) * scissor; // visualize SDF distance
-            }
-            else
-            {
-                float weight = 0.5;
-                float smoothing = clamp(4.0 / max(fontSize, 0.0001), 0.0, 0.5);
-                float coverage = smoothstep(weight - smoothing, weight + smoothing, distance);
-                float3 rgb = innerCol.rgb * coverage;
-                float alpha = innerCol.a * coverage;
-                result = float4(rgb, alpha) * scissor;
-            }
+            float weight = 0.5;
+            float smoothing = clamp(4.0 / max(fontSize, 0.0001), 0.0, 0.5);
+            float coverage = smoothstep(weight - smoothing, weight + smoothing, distance);
+            float3 rgb = innerCol.rgb * coverage;
+            float alpha = innerCol.a * coverage;
+            result = float4(rgb, alpha) * scissor;
         }
         streams.ColorTarget = result;
     }

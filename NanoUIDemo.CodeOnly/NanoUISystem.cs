@@ -11,8 +11,14 @@ using Stride.Core.Mathematics;
 using Stride.Core.Serialization.Contents;
 using Stride.Games;
 using Stride.Graphics;
+using Stride.Input;
 using Stride.Rendering;
 using Texture2D = Stride.Graphics.Texture;
+
+// NanoUI input aliases
+using UIKey = NanoUI.Common.Key;
+using UIKeyModifiers = NanoUI.Common.KeyModifiers;
+using UIPointerButton = NanoUI.Common.PointerButton;
 
 namespace NanoUIDemo.CodeOnly;
 
@@ -22,31 +28,35 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     const int INITIAL_VERTEX_BUFFER_SIZE = 128;
     const int INITIAL_INDEX_BUFFER_SIZE = 128;
 
-    public bool RenderDebug { get; set; } = true;
-
     // mapping texture ids & textures
     readonly Dictionary<int, Texture2D> _textures = [];
+    // track the original NanoUI format for each texture (needed for R8→RGBA expansion)
+    readonly Dictionary<int, TextureFormat> _textureSourceFormats = [];
     private int counter = 0;
 
-    private GraphicsContext _graphicsContext;
-    private GraphicsDeviceManager _deviceManager;
-    private EffectSystem _effectSystem;
-    private CommandList _commandList;
+    private GraphicsContext _graphicsContext = null!;
+    private GraphicsDeviceManager _deviceManager = null!;
+    private EffectSystem _effectSystem = null!;
+    private CommandList _commandList = null!;
 
-    private VertexDeclaration _nanoVertLayout;
+    private VertexDeclaration _nanoVertLayout = null!;
     private VertexBufferBinding _vertexBinding;
     private IndexBufferBinding _indexBinding;
-    private EffectInstance _nanoShader;
+    private EffectInstance _nanoShader = null!;
     private Dictionary<DrawCommandType, PipelineState> _pipelines = new();
-    private NvgContext _nanoContext;
+    private NvgContext _nanoContext = null!;
 
     private Logger _log => GlobalLogger.GetLogger(nameof(NanoUISystem));
+
+    // Input tracking
+    private InputManager _input = null!;
+    private System.Numerics.Vector2 _previousMousePos;
 
     // DemoTypes:
     // Docking, Drawing, SDFText, SvgShapes, TextShapes, UIBasic, UIExtended, UIExtended2,
     // UIExperimental, UILayouts
-    static DemoType _demoType = DemoType.UILayouts;
-    static DemoBase _demo;
+    static DemoType _demoType = DemoType.UIBasic;
+    static DemoBase _demo = null!;
 
     public NanoUISystem([NotNull] IServiceRegistry registry) : base(registry)
     {
@@ -54,9 +64,10 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     protected override void LoadContent()
     {
-        _effectSystem = Services.GetService<EffectSystem>();
-        _deviceManager = Services.GetService<IGraphicsDeviceManager>() as GraphicsDeviceManager;
-        _graphicsContext = Services.GetService<IGame>().GraphicsContext;
+        _effectSystem = Services.GetService<EffectSystem>()!;
+        _deviceManager = (Services.GetService<IGraphicsDeviceManager>() as GraphicsDeviceManager)!;
+        _graphicsContext = Services.GetService<IGame>()!.GraphicsContext;
+        _input = Services.GetService<InputManager>()!;
 
         Game.Window.ClientSizeChanged += Window_ClientSizeChanged;
 
@@ -64,11 +75,14 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         Visible = true; // Force Draw related functions to be run
         UpdateOrder = 1; // Update should occur after Stride's InputManager
 
+        // vbos etc
+        CreateDeviceObjects();
+
         _nanoContext = new(this);
 
         _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
 
-#warning Clean up with a custom base Stride page later.
+        // TODO: Clean up with a custom base Stride page later.
         // Make UI screen transparent so the 3D scene shows through
         if (_demo?.Screen != null)
         {
@@ -76,9 +90,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             _demo.Screen.BackgroundFocused = new SolidBrush(NanoUI.Common.Color.Transparent);
             _demo.Screen.BackgroundPushed = new SolidBrush(NanoUI.Common.Color.Transparent);
         }
-
-        // vbos etc
-        CreateDeviceObjects();
     }
 
     void CreateDeviceObjects()
@@ -111,17 +122,15 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     void InitNullTexture()
     {
-        var color = Color4.White;
-        byte[] colorBytes = new byte[]
-        {
-            (byte)(color.R * 255),
-            (byte)(color.G * 255),
-            (byte)(color.B * 255),
-            (byte)(color.A * 255)
-        };
+        byte[] colorBytes =
+        [
+            255, // R
+            255, // G
+            255, // B
+            255  // A
+        ];
         // create a null texture (for default texture)
-        var nullTexture = Texture2D.New2D(GraphicsDevice, 1, 1, PixelFormat.R8G8B8A8_UNorm, usage: GraphicsResourceUsage.Default, 
-            textureData: colorBytes);
+        var nullTexture = Texture2D.New2D<byte>(GraphicsDevice, 1, 1, PixelFormat.R8G8B8A8_UNorm, colorBytes);
         _textures.Add(-1, nullTexture);
     }
 
@@ -267,14 +276,87 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     #endregion
 
-    private void Window_ClientSizeChanged(object sender, EventArgs e)
+    private void Window_ClientSizeChanged(object? sender, EventArgs e)
     {
         // TODO: handle window resize, when needed
     }
 
     public override void Update(GameTime gameTime)
     {
+        ProcessInput();
         _demo.Update((float)gameTime.Elapsed.TotalSeconds);
+    }
+
+    void ProcessInput()
+    {
+        if (_input.Mouse == null)
+            return;
+
+        var mouse = _input.Mouse;
+        var mousePos = new System.Numerics.Vector2(mouse.Position.X * Game.Window.ClientBounds.Width,
+                                                    mouse.Position.Y * Game.Window.ClientBounds.Height);
+
+        // Mouse move
+        var delta = mousePos - _previousMousePos;
+        if (delta.X != 0 || delta.Y != 0)
+        {
+            _demo.OnPointerMove(mousePos, delta);
+        }
+        _previousMousePos = mousePos;
+
+        // Mouse buttons
+        foreach (var btn in mouse.PressedButtons)
+        {
+            _demo.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), true);
+        }
+        foreach (var btn in mouse.ReleasedButtons)
+        {
+            _demo.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), false);
+        }
+
+        // Mouse scroll
+        float wheelDelta = _input.MouseWheelDelta;
+        if (wheelDelta != 0)
+        {
+            _demo.OnPointerScroll(mousePos, new System.Numerics.Vector2(0, wheelDelta));
+        }
+
+        // Keyboard
+        if (_input.Keyboard != null)
+        {
+            var keyboard = _input.Keyboard;
+
+            // Key down events
+            foreach (var key in keyboard.PressedKeys)
+            {
+                if (NanoInputMapping.TryMapKey(key, true, out var uiKey, out _))
+                {
+                    _demo.OnKeyUpDown(uiKey, true, NanoInputMapping.KeyModifiers);
+                }
+            }
+
+            // Key up events
+            foreach (var key in keyboard.ReleasedKeys)
+            {
+                if (NanoInputMapping.TryMapKey(key, false, out var uiKey, out _))
+                {
+                    _demo.OnKeyUpDown(uiKey, false, NanoInputMapping.KeyModifiers);
+                }
+            }
+
+            // Text input (character events)
+            foreach (var ev in _input.Events)
+            {
+                if (ev is TextInputEvent textEvent)
+                {
+                    foreach (char c in textEvent.Text)
+                    {
+                        if (c >= 32) // skip control characters
+                            _demo.OnKeyChar(c);
+                    }
+                }
+            }
+        }
     }
 
     public override void Draw(GameTime gameTime)
@@ -318,8 +400,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // get uniforms once
         ReadOnlySpan<FragmentUniform> uniforms = DrawCache.Uniforms;
 
-        float debugTextDraw = RenderDebug ? 1f : 0f;
-
         // loop draw commands
         foreach (var drawCommand in DrawCache.DrawCommands)
         {
@@ -340,7 +420,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.unused1, debugTextDraw);
             }
 
             // Pipeline
@@ -411,24 +490,18 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     public int CreateTexture(string path, NanoUI.Common.TextureFlags textureFlags = 0)
     {
-        Texture2D textureData = null;
-
-        // If not in content, try to import from file system
-        if (File.Exists(path))
-        {
-            using (Stream stream = File.OpenRead(path))
-            {
-                var localTexture = Image.Load(stream);
-                ((ContentManager)Content).Save(path, localTexture);
-            }
-            textureData = Content.Load<Texture2D>(path);
-        }
-        else
-        {
+        // Try to import from file system
+        if (!File.Exists(path))
             return -1; // invalid texture id
+
+        using (Stream stream = File.OpenRead(path))
+        {
+            var localTexture = Image.Load(stream);
+            ((ContentManager)Content).Save(path, localTexture);
         }
 
-        // Keep the texture as-is to preserve channel order and format
+        var textureData = Content.Load<Texture2D>(path);
+
         counter++;
         _textures.Add(counter, textureData);
         return counter;
@@ -436,37 +509,65 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     public int CreateTexture(TextureDesc description)
     {
-        var pixelFormat = MapTextureFormat(description.Format);
-
+        // Always use RGBA for GPU textures — R8 data will be expanded in UpdateTexture.
+        // This avoids Stride issues with R8_UNorm texture data upload.
         var texture = Texture2D.New2D(GraphicsDevice, 
             (int)description.Width,
             (int)description.Height, 
-            pixelFormat, 
-            usage: GraphicsResourceUsage.Default);
+            PixelFormat.R8G8B8A8_UNorm);
 
         counter++;
         _textures.Add(counter, texture);
+        _textureSourceFormats[counter] = description.Format;
         return counter;
     }
 
     public bool UpdateTexture(int texture, ReadOnlySpan<byte> data)
     {
-        if (!data.IsEmpty && _textures.TryGetValue(texture, out var tex))
+        if (data.IsEmpty || !_textures.TryGetValue(texture, out var tex))
+            return false;
+
+        int width = tex.Width;
+        int height = tex.Height;
+
+        // Check if this was originally an R8 texture (font atlas)
+        bool isR8Source = _textureSourceFormats.TryGetValue(texture, out var srcFormat)
+            && srcFormat == TextureFormat.R;
+
+        byte[] textureData;
+        if (isR8Source)
         {
-            // If atlas is R8_UNorm, stride expects width*height bytes
-            tex.SetData(_graphicsContext.CommandList, data.ToArray());
-            return true;
+            // Expand single-channel R8 data to RGBA (r → r,r,r,r)
+            textureData = new byte[data.Length * 4];
+            for (int i = 0; i < data.Length; i++)
+            {
+                byte v = data[i];
+                int j = i * 4;
+                textureData[j]     = v;
+                textureData[j + 1] = v;
+                textureData[j + 2] = v;
+                textureData[j + 3] = v;
+            }
         }
-        return false;
+        else
+        {
+            textureData = data.ToArray();
+        }
+
+        var newTex = Texture2D.New2D<byte>(GraphicsDevice, width, height,
+            PixelFormat.R8G8B8A8_UNorm, textureData);
+        tex.Dispose();
+        _textures[texture] = newTex;
+        return true;
     }
 
     public bool DeleteTexture(int texture)
     {
         if (_textures.TryGetValue(texture, out var tex))
         {
-            // If the texture is managed by Content, disposing it is optional. For safety in demo, just remove.
             tex?.Dispose();
             _textures.Remove(texture);
+            _textureSourceFormats.Remove(texture);
             return true;
         }
 
@@ -494,29 +595,17 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
         tex?.Dispose();
 
-        var pixelFormat = MapTextureFormat(description.Format);
+        // Always use RGBA — R8 data will be expanded in UpdateTexture
         var newTexture = Texture2D.New2D(
             GraphicsDevice,
             (int)description.Width,
             (int)description.Height,
-            pixelFormat,
-            usage: GraphicsResourceUsage.Default);
+            PixelFormat.R8G8B8A8_UNorm);
 
         _textures[texture] = newTexture;
+        _textureSourceFormats[texture] = description.Format;
 
         return true;
-    }
-
-    public bool UpdateTextureRegion(int texture, System.Numerics.Vector4 regionRect, ReadOnlySpan<byte> allData)
-    {
-        if (_textures.TryGetValue(texture, out var tex))
-        {
-            // Update full texture; regionRect ignored as suggested
-            tex.SetData(_graphicsContext.CommandList, allData.ToArray());
-            return true;
-        }
-
-        return false;
     }
     #endregion
 

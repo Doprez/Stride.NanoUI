@@ -2,10 +2,12 @@
 using Stride.CommunityToolkit.Bullet;
 using Stride.CommunityToolkit.Engine;
 using Stride.CommunityToolkit.Games;
-using Stride.CommunityToolkit.ImGui;
 using Stride.CommunityToolkit.Skyboxes;
-using Stride.Core;
 using Stride.Engine;
+
+// Set working directory to executable location so relative asset paths resolve correctly
+var appDir = AppContext.BaseDirectory;
+Directory.SetCurrentDirectory(appDir);
 
 using var game = new Game();
 
