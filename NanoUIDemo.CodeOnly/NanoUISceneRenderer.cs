@@ -97,8 +97,31 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
             if (components.Count == 0)
                 return;
 
-            // Render world-space panels first, then fullscreen overlays on top
-            components.Sort((a, b) => a.IsFullScreen.CompareTo(b.IsFullScreen));
+            // Sort render order: world-space panels back-to-front (painter's algorithm),
+            // then fullscreen overlays last so they always appear on top.
+            Vector3 cameraPos = Vector3.Zero;
+            if (_hasCameraMatrices)
+            {
+                Matrix.Invert(ref _cameraView, out var cameraWorld);
+                cameraPos = cameraWorld.TranslationVector;
+            }
+
+            components.Sort((a, b) =>
+            {
+                // Fullscreen always renders after world-space
+                if (a.IsFullScreen != b.IsFullScreen)
+                    return a.IsFullScreen.CompareTo(b.IsFullScreen);
+
+                // Both world-space: farthest first (back-to-front)
+                if (!a.IsFullScreen)
+                {
+                    float distA = (a.Entity.Transform.WorldMatrix.TranslationVector - cameraPos).LengthSquared();
+                    float distB = (b.Entity.Transform.WorldMatrix.TranslationVector - cameraPos).LengthSquared();
+                    return distB.CompareTo(distA); // descending – far panels first
+                }
+
+                return 0;
+            });
 
             var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
             var screenSize = new System.Numerics.Vector2(backBufferSize.Width, backBufferSize.Height);

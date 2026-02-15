@@ -34,36 +34,43 @@ void Start(Scene scene)
     var compositor = game.SceneSystem.GraphicsCompositor;
     compositor.AddSceneRenderer(new NanoUISceneRenderer());
 
-    // --- Panel 1: Billboard (faces the camera), centre ---
-    var billboard = DemoNanoUIComponent.Create(DemoType.UIBasic, isFullScreen: false);
-    billboard.IsBillboard = true;
-    var billboardEntity = new Entity("NanoUI - Billboard")
+    // --- Panel 1: Cyberpunk HUD — Billboard (faces the camera), centre ---
+    var cyberpunkPanel = DemoNanoUIComponent.CreateCustom(
+        screen => new CyberpunkHudDemo(screen),
+        isFullScreen: false);
+    cyberpunkPanel.IsBillboard = true;
+    var cyberpunkEntity = new Entity("NanoUI - Cyberpunk HUD")
     {
-        billboard
+        cyberpunkPanel
     };
-    billboardEntity.Transform.Position = new Vector3(0, 1.5f, 0);
-    scene.Entities.Add(billboardEntity);
+    cyberpunkEntity.Transform.Position = new Vector3(0, 1.5f, 0);
+    scene.Entities.Add(cyberpunkEntity);
 
-    // --- Panel 2: Fixed panel, left side, rotated to face +X ---
-    var panelLeft = DemoNanoUIComponent.Create(DemoType.UIExtended, isFullScreen: true);
-    var leftEntity = new Entity("NanoUI - Left")
+    // --- Panel 2: Nature Dashboard — Fixed panel, left side, angled toward viewer ---
+    var naturePanel = DemoNanoUIComponent.CreateCustom(
+        screen => new NatureDashboardDemo(screen),
+        isFullScreen: false);
+    naturePanel.IsBillboard = false;
+    var natureEntity = new Entity("NanoUI - Nature Dashboard")
     {
-        panelLeft
+        naturePanel
     };
-    leftEntity.Transform.Position = new Vector3(-2f, 1.5f, -1f);
-    leftEntity.Transform.Rotation = Quaternion.RotationY(MathUtil.DegreesToRadians(45));
-    scene.Entities.Add(leftEntity);
+    natureEntity.Transform.Position = new Vector3(-2.2f, 1.5f, -1f);
+    natureEntity.Transform.Rotation = Quaternion.RotationY(MathUtil.DegreesToRadians(45));
+    scene.Entities.Add(natureEntity);
 
-    // --- Panel 3: Fixed panel, right side, rotated to face -X ---
-    var panelRight = DemoNanoUIComponent.Create(DemoType.UILayouts, isFullScreen: false);
-    panelRight.IsBillboard = false;
-    var rightEntity = new Entity("NanoUI - Right")
+    // --- Panel 3: Retro Terminal — Fixed panel, right side, angled toward viewer ---
+    var retroPanel = DemoNanoUIComponent.CreateCustom(
+        screen => new RetroTerminalDemo(screen),
+        isFullScreen: false);
+    retroPanel.IsBillboard = false;
+    var retroEntity = new Entity("NanoUI - Retro Terminal")
     {
-        panelRight
+        retroPanel
     };
-    rightEntity.Transform.Position = new Vector3(2f, 1.5f, -1f);
-    rightEntity.Transform.Rotation = Quaternion.RotationY(MathUtil.DegreesToRadians(-45));
-    scene.Entities.Add(rightEntity);
+    retroEntity.Transform.Position = new Vector3(2.2f, 1.5f, -1f);
+    retroEntity.Transform.Rotation = Quaternion.RotationY(MathUtil.DegreesToRadians(-45));
+    scene.Entities.Add(retroEntity);
 
     // makes the profiling much easier to read.
     game.SetMaxFPS(60);
