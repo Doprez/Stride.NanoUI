@@ -1,19 +1,14 @@
 ﻿using NanoUI;
-using NanoUI.Common;
 using NanoUI.Nvg;
-using NanoUI.Rendering;
-using NanoUI.Rendering.Data;
 using NanoUIDemos;
 using Stride.Core;
 using Stride.Core.Annotations;
 using Stride.Core.Diagnostics;
 using Stride.Core.Mathematics;
-using Stride.Core.Serialization.Contents;
+using Stride.Engine;
 using Stride.Games;
 using Stride.Graphics;
 using Stride.Input;
-using Stride.Rendering;
-using Texture2D = Stride.Graphics.Texture;
 
 // NanoUI input aliases
 using UIKey = NanoUI.Common.Key;
@@ -22,42 +17,28 @@ using UIPointerButton = NanoUI.Common.PointerButton;
 
 namespace NanoUIDemo.CodeOnly;
 
-public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
+/// <summary>
+/// Thin game-system service for NanoUI – handles input forwarding and per-frame
+/// updates for every <see cref="NanoUIComponent"/> in the scene.
+/// Mirrors the role of Stride.UI's <c>UISystem</c>.
+/// All GPU resources and rendering live in <see cref="NanoUISceneRenderer"/>.
+/// </summary>
+public partial class NanoUISystem : GameSystemBase, IService
 {
-
-    const int INITIAL_VERTEX_BUFFER_SIZE = 128;
-    const int INITIAL_INDEX_BUFFER_SIZE = 128;
-
-    // mapping texture ids & textures
-    readonly Dictionary<int, Texture2D> _textures = [];
-    // track the original NanoUI format for each texture (needed for R8→RGBA expansion)
-    readonly Dictionary<int, TextureFormat> _textureSourceFormats = [];
-    private int counter = 0;
-
-    private GraphicsContext _graphicsContext = null!;
-    private GraphicsDeviceManager _deviceManager = null!;
-    private EffectSystem _effectSystem = null!;
-    private CommandList _commandList = null!;
-
-    private VertexDeclaration _nanoVertLayout = null!;
-    private VertexBufferBinding _vertexBinding;
-    private IndexBufferBinding _indexBinding;
-    private EffectInstance _nanoShader = null!;
-    private Dictionary<DrawCommandType, PipelineState> _pipelines = new();
-    private NvgContext _nanoContext = null!;
-
     private Logger _log => GlobalLogger.GetLogger(nameof(NanoUISystem));
 
     // Input tracking
     private InputManager _input = null!;
     private System.Numerics.Vector2 _previousMousePos;
 
+    /// <summary>Set by <see cref="NanoUISceneRenderer"/> after it creates the NvgContext.</summary>
+    internal NvgContext? NanoContext { get; set; }
 
-    // DemoTypes:
-    // Docking, Drawing, SDFText, SvgShapes, TextShapes, UIBasic, UIExtended, UIExtended2,
-    // UIExperimental, UILayouts
-    static DemoType _demoType = DemoType.UIBasic;
-    static DemoBase _demo = null!;
+    // Camera matrices – written by NanoUISceneRenderer each frame so we
+    // can do world-space hit-testing one frame later.
+    internal Matrix CameraView { get; set; }
+    internal Matrix CameraViewProjection { get; set; }
+    internal bool HasCameraMatrices { get; set; }
 
     public NanoUISystem([NotNull] IServiceRegistry registry) : base(registry)
     {
@@ -65,235 +46,63 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     protected override void LoadContent()
     {
-        _effectSystem = Services.GetService<EffectSystem>()!;
-        _deviceManager = (Services.GetService<IGraphicsDeviceManager>() as GraphicsDeviceManager)!;
-        _graphicsContext = Services.GetService<IGame>()!.GraphicsContext;
         _input = Services.GetService<InputManager>()!;
 
         Game.Window.ClientSizeChanged += Window_ClientSizeChanged;
 
-        Enabled = true; // Force Update functions to be run
-        Visible = true; // Force Draw related functions to be run
-        UpdateOrder = 1; // Update should occur after Stride's InputManager
-        DrawOrder = 10000; // Draw after compositor so post-processing doesn't affect the UI
-
-        // vbos etc
-        CreateDeviceObjects();
-
-        _nanoContext = new(this);
-
-        // Use the back buffer size so UI coordinates match the rendering projection
-        var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
-        _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(backBufferSize.Width, backBufferSize.Height));
-
-        // TODO: Clean up with a custom base Stride page later.
-        // Make UI screen transparent so the 3D scene shows through
-        if (_demo?.Screen != null)
-        {
-            _demo.Screen.BackgroundUnfocused = new SolidBrush(NanoUI.Common.Color.Transparent);
-            _demo.Screen.BackgroundFocused = new SolidBrush(NanoUI.Common.Color.Transparent);
-            _demo.Screen.BackgroundPushed = new SolidBrush(NanoUI.Common.Color.Transparent);
-        }
+        Enabled = true;  // Update() will be called
+        Visible = false; // No Draw() – rendering is handled by the compositor via NanoUISceneRenderer
     }
-
-    void CreateDeviceObjects()
-    {
-        // set up a commandlist
-        _commandList = _graphicsContext.CommandList;
-
-        // compile the shader
-        _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
-        _nanoShader.UpdateEffect(GraphicsDevice);
-        _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.LinearClamp);
-
-        _nanoVertLayout = new VertexDeclaration(
-            VertexElement.Position<Vector2>(),
-            VertexElement.TextureCoordinate<Vector2>()
-        );
-
-        InitPipelineSates();
-        InitNullTexture();
-
-        var is32Bits = false;
-        var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, INITIAL_INDEX_BUFFER_SIZE * sizeof(ushort), GraphicsResourceUsage.Dynamic);
-        var indexBufferBinding = new IndexBufferBinding(indexBuffer, is32Bits, 0);
-        _indexBinding = indexBufferBinding;
-
-        var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, INITIAL_VERTEX_BUFFER_SIZE * _nanoVertLayout.CalculateSize(), GraphicsResourceUsage.Dynamic);
-        var vertexBufferBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
-        _vertexBinding = vertexBufferBinding;
-    }
-
-    void InitNullTexture()
-    {
-        byte[] colorBytes =
-        [
-            255, // R
-            255, // G
-            255, // B
-            255  // A
-        ];
-        // create a null texture (for default texture)
-        var nullTexture = Texture2D.New2D<byte>(GraphicsDevice, 1, 1, PixelFormat.R8G8B8A8_UNorm, colorBytes);
-        _textures.Add(-1, nullTexture);
-    }
-
-    #region PipelineStates
-
-    void InitPipelineSates()
-    {
-        _pipelines.Add(DrawCommandType.Triangles, CreateModelPipeline());
-        _pipelines.Add(DrawCommandType.FillStencil, CreateFillStencilPipeline());
-        _pipelines.Add(DrawCommandType.Fill, CreateFillPipeline());
-    }
-
-    PipelineState CreateModelPipeline()
-    {
-        var modelPipeline = new PipelineStateDescription()
-        {
-            BlendState = BlendStates.AlphaBlend,
-
-            RasterizerState = new RasterizerStateDescription()
-            {
-                FillMode = FillMode.Solid,
-                CullMode = CullMode.None,
-                FrontFaceCounterClockwise = true,
-                DepthClipEnable = false,
-                ScissorTestEnable = false,
-            },
-
-            DepthStencilState = DepthStencilStates.None,
-
-            PrimitiveType = PrimitiveType.TriangleList,
-            InputElements = _nanoVertLayout.CreateInputElements(),
-
-            EffectBytecode = _nanoShader.Effect.Bytecode,
-            RootSignature = _nanoShader.RootSignature,
-
-            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
-        };
-
-        return PipelineState.New(GraphicsDevice, ref modelPipeline);
-    }
-
-    PipelineState CreateFillStencilPipeline()
-    {
-        var fillStencilPipeline = new PipelineStateDescription()
-        {
-            BlendState = BlendStates.ColorDisabled,
-
-            RasterizerState = new RasterizerStateDescription()
-            {
-                FillMode = FillMode.Solid,
-                CullMode = CullMode.None,
-                FrontFaceCounterClockwise = true,
-                ScissorTestEnable = false,
-                DepthClipEnable = false,
-            },
-
-            DepthStencilState = new DepthStencilStateDescription
-            {
-                DepthBufferEnable = false,
-                StencilEnable = true,
-                StencilMask = 0xff,
-                StencilWriteMask = 0xff,
-                
-                FrontFace = new DepthStencilStencilOpDescription
-                {
-                    StencilFunction = CompareFunction.Always,
-                    StencilFail = StencilOperation.Keep,
-                    StencilDepthBufferFail = StencilOperation.Keep,
-                    StencilPass = StencilOperation.Increment,
-                },
-
-                BackFace = new DepthStencilStencilOpDescription
-                {
-                    StencilFunction = CompareFunction.Always,
-                    StencilFail = StencilOperation.Keep,
-                    StencilDepthBufferFail = StencilOperation.Keep,
-                    StencilPass = StencilOperation.Decrement,
-                },
-            },
-
-            PrimitiveType = PrimitiveType.TriangleList,
-            InputElements = _nanoVertLayout.CreateInputElements(),
-
-            EffectBytecode = _nanoShader.Effect.Bytecode,
-            RootSignature = _nanoShader.RootSignature,
-
-            //Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
-        };
-
-        return PipelineState.New(GraphicsDevice, ref fillStencilPipeline);
-    }
-
-    PipelineState CreateFillPipeline()
-    {
-        var fillPipeline = new PipelineStateDescription()
-        {
-            BlendState = BlendStates.AlphaBlend,
-
-            RasterizerState = new RasterizerStateDescription()
-            {
-                FillMode = FillMode.Solid,
-                CullMode = CullMode.None,
-                FrontFaceCounterClockwise = true,
-                ScissorTestEnable = false,
-                DepthClipEnable = false,
-            },
-
-            DepthStencilState = new DepthStencilStateDescription
-            {
-                DepthBufferEnable = false,
-                StencilEnable = true,
-                StencilMask = 0xff,
-                StencilWriteMask = 0xff,
-
-                FrontFace = new DepthStencilStencilOpDescription
-                {
-                    StencilFunction = CompareFunction.NotEqual,
-                    StencilFail = StencilOperation.Zero,
-                    StencilDepthBufferFail = StencilOperation.Zero,
-                    StencilPass = StencilOperation.Zero,
-                },
-
-                BackFace = new DepthStencilStencilOpDescription
-                {
-                    StencilFunction = CompareFunction.NotEqual,
-                    StencilFail = StencilOperation.Zero,
-                    StencilDepthBufferFail = StencilOperation.Zero,
-                    StencilPass = StencilOperation.Zero,
-                },
-            },
-
-            PrimitiveType = PrimitiveType.TriangleList,
-            InputElements = _nanoVertLayout.CreateInputElements(),
-
-            EffectBytecode = _nanoShader.Effect.Bytecode,
-            RootSignature = _nanoShader.RootSignature,
-
-            Output = new RenderOutputDescription(PixelFormat.R8G8B8A8_UNorm)
-        };
-
-        return PipelineState.New(GraphicsDevice, ref fillPipeline);
-    }
-
-    #endregion
 
     private void Window_ClientSizeChanged(object? sender, EventArgs e)
     {
+        if (NanoContext == null) return;
+
         var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
-        var newSize = new Vector2(backBufferSize.Width, backBufferSize.Height);
-        _demo.ScreenResize(new System.Numerics.Vector2(newSize.X, newSize.Y), _nanoContext);
+        var newSize = new System.Numerics.Vector2(backBufferSize.Width, backBufferSize.Height);
+
+        foreach (var comp in CollectComponents())
+        {
+            if (!comp.Enabled || comp.Page?.Content == null) continue;
+
+            if (comp.IsFullScreen)
+            {
+                comp.Page.Content.ScreenResize(newSize, NanoContext);
+            }
+        }
     }
 
     public override void Update(GameTime gameTime)
     {
-        ProcessInput();
-        _demo.Update((float)gameTime.Elapsed.TotalSeconds);
+        var components = CollectComponents();
+        if (components.Count == 0) return;
+
+        float dt = (float)gameTime.Elapsed.TotalSeconds;
+
+        // Route input to every enabled component
+        foreach (var comp in components)
+        {
+            if (!comp.Enabled || comp.Page?.Content == null) continue;
+
+            if (comp.IsFullScreen)
+            {
+                ProcessInputFullscreen(comp.Page.Content);
+            }
+            else if (HasCameraMatrices)
+            {
+                ProcessInputWorldSpace(comp);
+            }
+        }
+
+        // Update all components
+        foreach (var comp in components)
+        {
+            if (!comp.Enabled || comp.Page?.Content == null) continue;
+            comp.Page.Content.Update(dt);
+        }
     }
 
-    void ProcessInput()
+    void ProcessInputFullscreen(DemoBase content)
     {
         if (_input.Mouse == null)
             return;
@@ -309,320 +118,143 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         var delta = mousePos - _previousMousePos;
         if (delta.X != 0 || delta.Y != 0)
         {
-            _demo.OnPointerMove(mousePos, delta);
+            content.OnPointerMove(mousePos, delta);
         }
         _previousMousePos = mousePos;
 
         // Mouse buttons
         foreach (var btn in mouse.PressedButtons)
         {
-            _demo.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), true);
+            content.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), true);
         }
         foreach (var btn in mouse.ReleasedButtons)
         {
-            _demo.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), false);
+            content.OnPointerUpDown(mousePos, NanoInputMapping.MapMouseButtons(btn), false);
         }
 
         // Mouse scroll
         float wheelDelta = _input.MouseWheelDelta;
         if (wheelDelta != 0)
         {
-            _demo.OnPointerScroll(mousePos, new System.Numerics.Vector2(0, wheelDelta));
+            content.OnPointerScroll(mousePos, new System.Numerics.Vector2(0, wheelDelta));
         }
 
-        // Keyboard
-        if (_input.Keyboard != null)
+        ProcessKeyboardInput(content);
+    }
+
+    /// <summary>
+    /// Processes input for a world-space (non-fullscreen) component by ray-casting
+    /// the mouse position onto the panel plane.
+    /// </summary>
+    void ProcessInputWorldSpace(NanoUIComponent comp)
+    {
+        if (_input.Mouse == null || comp.Page?.Content == null)
+            return;
+
+        var content = comp.Page.Content;
+        var mouse = _input.Mouse;
+
+        // Ray-cast to find panel-space mouse position
+        bool onPanel = comp.TryScreenToPanel(
+            mouse.Position, CameraViewProjection, CameraView,
+            out var panelMousePos);
+
+        if (onPanel)
         {
-            var keyboard = _input.Keyboard;
+            var delta = panelMousePos - _previousMousePos;
+            if (delta.X != 0 || delta.Y != 0)
+                content.OnPointerMove(panelMousePos, delta);
+            _previousMousePos = panelMousePos;
 
-            // Key down events
-            foreach (var key in keyboard.PressedKeys)
+            foreach (var btn in mouse.PressedButtons)
+                content.OnPointerUpDown(panelMousePos, NanoInputMapping.MapMouseButtons(btn), true);
+            foreach (var btn in mouse.ReleasedButtons)
+                content.OnPointerUpDown(panelMousePos, NanoInputMapping.MapMouseButtons(btn), false);
+
+            float wheelDelta = _input.MouseWheelDelta;
+            if (wheelDelta != 0)
+                content.OnPointerScroll(panelMousePos, new System.Numerics.Vector2(0, wheelDelta));
+        }
+
+        // Keyboard always forwarded regardless of mouse position
+        ProcessKeyboardInput(content);
+    }
+
+    void ProcessKeyboardInput(DemoBase content)
+    {
+        if (_input.Keyboard == null) return;
+
+        var keyboard = _input.Keyboard;
+
+        foreach (var key in keyboard.PressedKeys)
+        {
+            if (NanoInputMapping.TryMapKey(key, true, out var uiKey, out _))
             {
-                if (NanoInputMapping.TryMapKey(key, true, out var uiKey, out _))
-                {
-                    _demo.OnKeyUpDown(uiKey, true, NanoInputMapping.KeyModifiers);
-                }
+                content.OnKeyUpDown(uiKey, true, NanoInputMapping.KeyModifiers);
             }
+        }
 
-            // Key up events
-            foreach (var key in keyboard.ReleasedKeys)
+        foreach (var key in keyboard.ReleasedKeys)
+        {
+            if (NanoInputMapping.TryMapKey(key, false, out var uiKey, out _))
             {
-                if (NanoInputMapping.TryMapKey(key, false, out var uiKey, out _))
-                {
-                    _demo.OnKeyUpDown(uiKey, false, NanoInputMapping.KeyModifiers);
-                }
+                content.OnKeyUpDown(uiKey, false, NanoInputMapping.KeyModifiers);
             }
+        }
 
-            // Text input (character events)
-            foreach (var ev in _input.Events)
+        foreach (var ev in _input.Events)
+        {
+            if (ev is TextInputEvent textEvent)
             {
-                if (ev is TextInputEvent textEvent)
+                foreach (char c in textEvent.Text)
                 {
-                    foreach (char c in textEvent.Text)
-                    {
-                        if (c >= 32) // skip control characters
-                            _demo.OnKeyChar(c);
-                    }
+                    if (c >= 32)
+                        content.OnKeyChar(c);
                 }
             }
         }
     }
 
-    public override void Draw(GameTime gameTime)
+    /// <summary>
+    /// Walks all scenes and collects every <see cref="NanoUIComponent"/>.
+    /// </summary>
+    private List<NanoUIComponent> CollectComponents()
     {
-        _nanoContext.BeginFrame();
-        _demo.Draw(_nanoContext);
-        _nanoContext.EndFrame();
+        var result = new List<NanoUIComponent>();
+
+        var sceneSystem = Services.GetService<SceneSystem>();
+        if (sceneSystem?.SceneInstance == null)
+            return result;
+
+        CollectFromScene(sceneSystem.SceneInstance.RootScene, result);
+        return result;
+    }
+
+    private static void CollectFromScene(Scene? scene, List<NanoUIComponent> result)
+    {
+        if (scene == null) return;
+
+        foreach (var entity in scene.Entities)
+        {
+            var comp = entity.Get<NanoUIComponent>();
+            if (comp != null)
+                result.Add(comp);
+        }
+
+        foreach (var child in scene.Children)
+        {
+            CollectFromScene(child, result);
+        }
     }
 
     protected override void Destroy()
     {
-        _demo?.Dispose();
-        _nanoContext?.Dispose();
-    }
-
-    #region INvgRenderer
-
-    public void Render()
-    {
-        DoRender();
-    }
-
-    void DoRender()
-    {
-        // Ensure we render directly to the back buffer so post-processing
-        // (tonemapping, bloom, etc.) from the compositor does not affect the UI.
-        var backBuffer = GraphicsDevice.Presenter.BackBuffer;
-        var depthStencil = GraphicsDevice.Presenter.DepthStencilBuffer;
-        _commandList.SetRenderTarget(depthStencil, backBuffer);
-        _commandList.SetViewport(new Viewport(0, 0, backBuffer.Width, backBuffer.Height));
-
-        // view proj (top-left origin)
-        var surfaceSize = backBuffer.Size;
-        var projMatrix = Matrix.OrthoOffCenterRH(0, surfaceSize.Width, surfaceSize.Height, 0, -1, 1);
-
-        UpdateIndexBuffer(DrawCache.Indexes);
-        UpdateVertexBuffer(DrawCache.Vertices);
-
-        _commandList.SetVertexBuffer(0, _vertexBinding.Buffer, 0, _nanoVertLayout.VertexStride);
-        _commandList.SetIndexBuffer(_indexBinding.Buffer, 0, false);
-
-        // previous params
-        DrawCommandType? previousDrawCommandType = null;
-        bool updateTextureRS = true;
-        int previousTexture = -1; // if below 0, gets null rs
-        int uniformOffset = -1;
-
-        // get uniforms once
-        ReadOnlySpan<FragmentUniform> uniforms = DrawCache.Uniforms;
-
-        // loop draw commands
-        foreach (var drawCommand in DrawCache.DrawCommands)
+        foreach (var comp in CollectComponents())
         {
-            // Uniforms
-            if (uniformOffset != drawCommand.UniformOffset)
-            {
-                uniformOffset = drawCommand.UniformOffset;
-                var newUniform = uniforms[drawCommand.UniformOffset];
-
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, newUniform.InnerCol);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, newUniform.OuterCol);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, newUniform.ScissorScale);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorExt, newUniform.ScissorExt);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.extent, newUniform.Extent);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.radius, newUniform.Radius);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
-
-
-            }
-
-            // Pipeline
-            if (previousDrawCommandType != drawCommand.DrawCommandType)
-            {
-                previousDrawCommandType = drawCommand.DrawCommandType;
-                if (!_pipelines.TryGetValue(drawCommand.DrawCommandType, out var pipeline) || pipeline == null)
-                {
-                    // fallback to model pipeline if specific one not found
-                    _pipelines.TryGetValue(DrawCommandType.Triangles, out pipeline);
-                }
-                _commandList.SetPipelineState(pipeline);
-                updateTextureRS = true;
-            }
-
-            // Texture
-            if (updateTextureRS || previousTexture != drawCommand.Texture)
-            {
-                previousTexture = drawCommand.Texture;
-                if (!_textures.TryGetValue(drawCommand.Texture, out var textureResource))
-                    textureResource = _textures[-1];
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.tex, textureResource);
-                updateTextureRS = false;
-            }
-
-            // Proj + draw
-            _nanoShader.Parameters.Set(NanoUIShaderKeys.proj, ref projMatrix);
-            _nanoShader.Apply(_graphicsContext);
-            _commandList.DrawIndexed(drawCommand.IndexCount, drawCommand.IndexOffset, drawCommand.VertexOffset);
+            comp.Page?.Dispose();
         }
+        NanoContext?.Dispose();
     }
-
-    void UpdateIndexBuffer(ReadOnlySpan<ushort> indices)
-    {
-        uint totalIBOSize = (uint)(indices.Length * sizeof(ushort));
-        if (totalIBOSize > _indexBinding.Buffer.SizeInBytes)
-        {
-            var is32Bits = false;
-            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 1.5f), GraphicsResourceUsage.Dynamic);
-            _indexBinding = new IndexBufferBinding(indexBuffer, is32Bits, 0);
-        }
-
-        _indexBinding.Buffer.SetData(_commandList, indices);
-    }
-
-    void UpdateVertexBuffer(ReadOnlySpan<Vertex> vertices)
-    {
-        uint totalVBOSize = (uint)(vertices.Length * Vertex.SizeInBytes);
-        if (totalVBOSize > _vertexBinding.Buffer.SizeInBytes)
-        {
-            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 1.5f), GraphicsResourceUsage.Dynamic);
-            _vertexBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
-        }
-
-        _vertexBinding.Buffer.SetData(_commandList, vertices);
-    }
-
-    static PixelFormat MapTextureFormat(TextureFormat format)
-    {
-        return format switch
-        {
-            TextureFormat.R => PixelFormat.R8_UNorm,
-            TextureFormat.RG => PixelFormat.R8G8_UNorm,
-            TextureFormat.RGBA => PixelFormat.R8G8B8A8_UNorm,
-            _ => PixelFormat.R8G8B8A8_UNorm,
-        };
-    }
-
-    public int CreateTexture(string path, NanoUI.Common.TextureFlags textureFlags = 0)
-    {
-        // Try to import from file system
-        if (!File.Exists(path))
-            return -1; // invalid texture id
-
-        using (Stream stream = File.OpenRead(path))
-        {
-            var localTexture = Image.Load(stream);
-            ((ContentManager)Content).Save(path, localTexture);
-        }
-
-        var textureData = Content.Load<Texture2D>(path);
-
-        counter++;
-        _textures.Add(counter, textureData);
-        return counter;
-    }
-
-    public int CreateTexture(TextureDesc description)
-    {
-        // Always create as RGBA with Default usage
-        // R8 atlas data will be expanded to RGBA in UpdateTexture
-        var texture = Texture2D.New2D(GraphicsDevice, 
-            (int)description.Width,
-            (int)description.Height, 
-            PixelFormat.R8G8B8A8_UNorm,
-            usage: GraphicsResourceUsage.Default);
-
-        counter++;
-        _textures.Add(counter, texture);
-        _textureSourceFormats[counter] = description.Format;
-        return counter;
-    }
-
-    public bool UpdateTexture(int texture, ReadOnlySpan<byte> data)
-    {
-        if (data.IsEmpty || !_textures.TryGetValue(texture, out var tex))
-            return false;
-
-        // Check if this was originally an R8 texture (font atlas)
-        bool isR8Source = _textureSourceFormats.TryGetValue(texture, out var srcFormat)
-            && srcFormat == TextureFormat.R;
-
-        byte[] textureData;
-        if (isR8Source)
-        {
-            // Expand single-channel R8 data to RGBA (r → r,r,r,r)
-            textureData = new byte[data.Length * 4];
-            for (int i = 0; i < data.Length; i++)
-            {
-                byte v = data[i];
-                int j = i * 4;
-                textureData[j]     = v;
-                textureData[j + 1] = v;
-                textureData[j + 2] = v;
-                textureData[j + 3] = v;
-            }
-        }
-        else
-        {
-            textureData = data.ToArray();
-        }
-
-        // Update the existing texture in-place via SetData (no recreation)
-        tex.SetData(_commandList, textureData);
-        return true;
-    }
-
-    public bool DeleteTexture(int texture)
-    {
-        if (_textures.TryGetValue(texture, out var tex))
-        {
-            tex?.Dispose();
-            _textures.Remove(texture);
-            _textureSourceFormats.Remove(texture);
-            return true;
-        }
-
-        return false;
-    }
-
-    public bool GetTextureSize(int texture, out System.Numerics.Vector2 size)
-    {
-        if (_textures.TryGetValue(texture, out var tex))
-        {
-            size = new Vector2(tex.Width, tex.Height);
-            return true;
-        }
-
-        size = Vector2.Zero;
-        return false;
-    }
-
-    public bool ResizeTexture(int texture, TextureDesc description)
-    {
-        if (!_textures.TryGetValue(texture, out var tex))
-        {
-            return false;
-        }
-
-        tex?.Dispose();
-
-        // Always use RGBA — R8 data will be expanded in UpdateTexture
-        var newTexture = Texture2D.New2D(
-            GraphicsDevice,
-            (int)description.Width,
-            (int)description.Height,
-            PixelFormat.R8G8B8A8_UNorm,
-            usage: GraphicsResourceUsage.Default);
-
-        _textures[texture] = newTexture;
-        _textureSourceFormats[texture] = description.Format;
-
-        return true;
-    }
-    #endregion
 
     public static IService NewInstance(IServiceRegistry services)
     {
