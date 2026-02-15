@@ -20,6 +20,8 @@ void Start(Scene scene)
 
     game.AddSkybox();
 
+    game.Window.AllowUserResizing = true;
+
     var ui = game.Services.GetOrCreate<NanoUISystem>();
     game.GameSystems.Add(ui);
 

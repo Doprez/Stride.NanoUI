@@ -75,13 +75,16 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         Enabled = true; // Force Update functions to be run
         Visible = true; // Force Draw related functions to be run
         UpdateOrder = 1; // Update should occur after Stride's InputManager
+        DrawOrder = 10000; // Draw after compositor so post-processing doesn't affect the UI
 
         // vbos etc
         CreateDeviceObjects();
 
         _nanoContext = new(this);
 
-        _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(Game.Window.PreferredWindowedSize.X, Game.Window.PreferredWindowedSize.Y));
+        // Use the back buffer size so UI coordinates match the rendering projection
+        var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
+        _demo = DemoFactory.CreateDemo(_nanoContext, _demoType, new Vector2(backBufferSize.Width, backBufferSize.Height));
 
         // TODO: Clean up with a custom base Stride page later.
         // Make UI screen transparent so the 3D scene shows through
@@ -279,7 +282,9 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     private void Window_ClientSizeChanged(object? sender, EventArgs e)
     {
-        // TODO: handle window resize, when needed
+        var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
+        var newSize = new Vector2(backBufferSize.Width, backBufferSize.Height);
+        _demo.ScreenResize(new System.Numerics.Vector2(newSize.X, newSize.Y), _nanoContext);
     }
 
     public override void Update(GameTime gameTime)
@@ -294,8 +299,11 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             return;
 
         var mouse = _input.Mouse;
-        var mousePos = new System.Numerics.Vector2(mouse.Position.X * Game.Window.ClientBounds.Width,
-                                                    mouse.Position.Y * Game.Window.ClientBounds.Height);
+        // Use back buffer size for coordinate conversion so mouse coords match the
+        // rendering projection (ClientBounds can differ due to DPI scaling).
+        var surfSize = GraphicsDevice.Presenter.BackBuffer.Size;
+        var mousePos = new System.Numerics.Vector2(mouse.Position.X * surfSize.Width,
+                                                    mouse.Position.Y * surfSize.Height);
 
         // Mouse move
         var delta = mousePos - _previousMousePos;
@@ -382,8 +390,15 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     void DoRender()
     {
+        // Ensure we render directly to the back buffer so post-processing
+        // (tonemapping, bloom, etc.) from the compositor does not affect the UI.
+        var backBuffer = GraphicsDevice.Presenter.BackBuffer;
+        var depthStencil = GraphicsDevice.Presenter.DepthStencilBuffer;
+        _commandList.SetRenderTarget(depthStencil, backBuffer);
+        _commandList.SetViewport(new Viewport(0, 0, backBuffer.Width, backBuffer.Height));
+
         // view proj (top-left origin)
-        var surfaceSize = GraphicsDevice.Presenter.BackBuffer.Size;
+        var surfaceSize = backBuffer.Size;
         var projMatrix = Matrix.OrthoOffCenterRH(0, surfaceSize.Width, surfaceSize.Height, 0, -1, 1);
 
         UpdateIndexBuffer(DrawCache.Indexes);
