@@ -462,6 +462,9 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
     /// <summary>
     /// Projects the four corners of a world-space panel onto the screen and returns
     /// the axis-aligned bounding rectangle clamped to the viewport.
+    /// If any corner is behind the near plane (W ≤ 0 in clip space) the full
+    /// viewport is returned, because the perspective divide would produce invalid
+    /// screen coordinates.  The NanoVG-level scissor still clips precisely.
     /// </summary>
     Rectangle ComputePanelScissorRect(NanoUIComponent comp, int viewportWidth, int viewportHeight)
     {
@@ -472,23 +475,33 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
         // Panel corners in NanoVG pixel space
         float resX = comp.Resolution.X;
         float resY = comp.Resolution.Y;
-        Span<Vector3> corners = stackalloc Vector3[4];
-        corners[0] = new Vector3(0,    0,    0); // top-left
-        corners[1] = new Vector3(resX, 0,    0); // top-right
-        corners[2] = new Vector3(resX, resY, 0); // bottom-right
-        corners[3] = new Vector3(0,    resY, 0); // bottom-left
+        Span<Vector4> corners = stackalloc Vector4[4];
+        corners[0] = new Vector4(0,    0,    0, 1); // top-left
+        corners[1] = new Vector4(resX, 0,    0, 1); // top-right
+        corners[2] = new Vector4(resX, resY, 0, 1); // bottom-right
+        corners[3] = new Vector4(0,    resY, 0, 1); // bottom-left
 
         float minX = float.MaxValue, minY = float.MaxValue;
         float maxX = float.MinValue, maxY = float.MinValue;
 
         for (int i = 0; i < 4; i++)
         {
-            // Transform to clip space
-            Vector3.TransformCoordinate(ref corners[i], ref fullTransform, out var ndc);
+            // Transform to homogeneous clip space (no W-divide yet)
+            Vector4.Transform(ref corners[i], ref fullTransform, out var clip);
+
+            // If any corner is behind the near plane the perspective divide
+            // would flip coordinates.  Fall back to the full viewport — the
+            // NanoVG shader scissor still clips correctly in pixel space.
+            if (clip.W <= 1e-6f)
+                return new Rectangle(0, 0, viewportWidth, viewportHeight);
+
+            // Manual perspective divide → NDC
+            float ndcX = clip.X / clip.W;
+            float ndcY = clip.Y / clip.W;
 
             // NDC → screen pixels (Stride NDC: X [-1,1] left→right, Y [-1,1] bottom→top)
-            float sx = (ndc.X * 0.5f + 0.5f) * viewportWidth;
-            float sy = (1f - (ndc.Y * 0.5f + 0.5f)) * viewportHeight;
+            float sx = (ndcX * 0.5f + 0.5f) * viewportWidth;
+            float sy = (1f - (ndcY * 0.5f + 0.5f)) * viewportHeight;
 
             if (sx < minX) minX = sx;
             if (sx > maxX) maxX = sx;
