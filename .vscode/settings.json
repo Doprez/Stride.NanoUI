@@ -2,6 +2,9 @@
     "chat.tools.terminal.autoApprove": {
         "dotnet package": true,
         "Out-Null": true,
-        "ForEach-Object": true
+        "ForEach-Object": true,
+        "ilspycmd": true,
+        "New-Item": true,
+        "Test-Path": true
     }
 }

@@ -46,7 +46,7 @@
     
     float scissorMask(float2 p) 
     {
-        float2 sc = (abs(mul(float4(p,0, 1.0), scissorMat).xy) - scissorExt);
+        float2 sc = (abs(mul(float4(p, 0, 1.0), scissorMat).xy) - scissorExt);
         sc = float2(0.5,0.5) - sc * scissorScale;
         return saturate(sc.x) * saturate(sc.y);
     }
@@ -59,7 +59,7 @@
 
         if (actionType == 0) 
         {
-            float2 pt = mul(float4(streams.fpos,0,1.0), paintMat).xy;
+            float2 pt = mul(float4(streams.fpos, 0, 1.0), paintMat).xy;
             float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
             float4 color = lerp(innerCol, outerCol, d);
             color *= strokeAlpha * scissor;
@@ -67,7 +67,7 @@
         }
         else if (actionType == 1)
         {
-            float2 pt = mul(float4(streams.fpos,0,1.0), paintMat).xy / max(extent, 1e-6);
+            float2 pt = mul(float4(streams.fpos, 0, 1.0), paintMat).xy / max(extent, 1e-6);
             float4 color = tex.Sample(TexSampler, pt);
             color = float4(color.rgb * color.a, color.a);
             if(any(innerCol))

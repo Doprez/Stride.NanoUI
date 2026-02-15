@@ -52,6 +52,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     private InputManager _input = null!;
     private System.Numerics.Vector2 _previousMousePos;
 
+
     // DemoTypes:
     // Docking, Drawing, SDFText, SvgShapes, TextShapes, UIBasic, UIExtended, UIExtended2,
     // UIExperimental, UILayouts
@@ -100,7 +101,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         // compile the shader
         _nanoShader = new EffectInstance(_effectSystem.LoadEffect("NanoUIShader").WaitForResult());
         _nanoShader.UpdateEffect(GraphicsDevice);
-        _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.PointClamp);
+        _nanoShader.Parameters.Set(NanoUIShaderKeys.TexSampler, GraphicsDevice.SamplerStates.LinearClamp);
 
         _nanoVertLayout = new VertexDeclaration(
             VertexElement.Position<Vector2>(),
@@ -147,7 +148,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         var modelPipeline = new PipelineStateDescription()
         {
-            BlendState = BlendStates.NonPremultiplied,
+            BlendState = BlendStates.AlphaBlend,
 
             RasterizerState = new RasterizerStateDescription()
             {
@@ -227,7 +228,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         var fillPipeline = new PipelineStateDescription()
         {
-            BlendState = BlendStates.NonPremultiplied,
+            BlendState = BlendStates.AlphaBlend,
 
             RasterizerState = new RasterizerStateDescription()
             {
@@ -409,8 +410,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 uniformOffset = drawCommand.UniformOffset;
                 var newUniform = uniforms[drawCommand.UniformOffset];
 
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, newUniform.ScissorMat);
-                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, newUniform.PaintMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorMat, (Matrix)newUniform.ScissorMat);
+                _nanoShader.Parameters.Set(NanoUIShaderKeys.paintMat, (Matrix)newUniform.PaintMat);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.innerCol, newUniform.InnerCol);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.outerCol, newUniform.OuterCol);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.scissorScale, newUniform.ScissorScale);
@@ -420,6 +421,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.feather, newUniform.Feather);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.actionType, newUniform.ActionType);
                 _nanoShader.Parameters.Set(NanoUIShaderKeys.fontSize, newUniform.FontSize);
+
+
             }
 
             // Pipeline
@@ -458,7 +461,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         if (totalIBOSize > _indexBinding.Buffer.SizeInBytes)
         {
             var is32Bits = false;
-            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 1.5f));
+            var indexBuffer = Stride.Graphics.Buffer.Index.New(GraphicsDevice, (int)(totalIBOSize * 1.5f), GraphicsResourceUsage.Dynamic);
             _indexBinding = new IndexBufferBinding(indexBuffer, is32Bits, 0);
         }
 
@@ -470,7 +473,7 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
         uint totalVBOSize = (uint)(vertices.Length * Vertex.SizeInBytes);
         if (totalVBOSize > _vertexBinding.Buffer.SizeInBytes)
         {
-            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 1.5f));
+            var vertexBuffer = Stride.Graphics.Buffer.Vertex.New(GraphicsDevice, (int)(totalVBOSize * 1.5f), GraphicsResourceUsage.Dynamic);
             _vertexBinding = new VertexBufferBinding(vertexBuffer, _nanoVertLayout, 0);
         }
 
@@ -509,12 +512,13 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
 
     public int CreateTexture(TextureDesc description)
     {
-        // Always use RGBA for GPU textures — R8 data will be expanded in UpdateTexture.
-        // This avoids Stride issues with R8_UNorm texture data upload.
+        // Always create as RGBA with Default usage
+        // R8 atlas data will be expanded to RGBA in UpdateTexture
         var texture = Texture2D.New2D(GraphicsDevice, 
             (int)description.Width,
             (int)description.Height, 
-            PixelFormat.R8G8B8A8_UNorm);
+            PixelFormat.R8G8B8A8_UNorm,
+            usage: GraphicsResourceUsage.Default);
 
         counter++;
         _textures.Add(counter, texture);
@@ -526,9 +530,6 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
     {
         if (data.IsEmpty || !_textures.TryGetValue(texture, out var tex))
             return false;
-
-        int width = tex.Width;
-        int height = tex.Height;
 
         // Check if this was originally an R8 texture (font atlas)
         bool isR8Source = _textureSourceFormats.TryGetValue(texture, out var srcFormat)
@@ -554,10 +555,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             textureData = data.ToArray();
         }
 
-        var newTex = Texture2D.New2D<byte>(GraphicsDevice, width, height,
-            PixelFormat.R8G8B8A8_UNorm, textureData);
-        tex.Dispose();
-        _textures[texture] = newTex;
+        // Update the existing texture in-place via SetData (no recreation)
+        tex.SetData(_commandList, textureData);
         return true;
     }
 
@@ -600,7 +599,8 @@ public partial class NanoUISystem : GameSystemBase, INvgRenderer, IService
             GraphicsDevice,
             (int)description.Width,
             (int)description.Height,
-            PixelFormat.R8G8B8A8_UNorm);
+            PixelFormat.R8G8B8A8_UNorm,
+            usage: GraphicsResourceUsage.Default);
 
         _textures[texture] = newTexture;
         _textureSourceFormats[texture] = description.Format;
