@@ -18,7 +18,7 @@ using UIPointerButton = NanoUI.Common.PointerButton;
 namespace NanoUIDemo.CodeOnly;
 
 /// <summary>
-/// Thin game-system service for NanoUI – handles input forwarding and per-frame
+/// Thin game-system service for NanoUI - handles input forwarding and per-frame
 /// updates for every <see cref="NanoUIComponent"/> in the scene.
 /// Mirrors the role of Stride.UI's <c>UISystem</c>.
 /// All GPU resources and rendering live in <see cref="NanoUISceneRenderer"/>.
@@ -34,7 +34,7 @@ public partial class NanoUISystem : GameSystemBase, IService
     /// <summary>Set by <see cref="NanoUISceneRenderer"/> after it creates the NvgContext.</summary>
     internal NvgContext? NanoContext { get; set; }
 
-    // Camera matrices – written by NanoUISceneRenderer each frame so we
+    // Camera matrices - written by NanoUISceneRenderer each frame so we
     // can do world-space hit-testing one frame later.
     internal Matrix CameraView { get; set; }
     internal Matrix CameraViewProjection { get; set; }
@@ -51,7 +51,7 @@ public partial class NanoUISystem : GameSystemBase, IService
         Game.Window.ClientSizeChanged += Window_ClientSizeChanged;
 
         Enabled = true;  // Update() will be called
-        Visible = false; // No Draw() – rendering is handled by the compositor via NanoUISceneRenderer
+        Visible = false; // No Draw() - rendering is handled by the compositor via NanoUISceneRenderer
     }
 
     private void Window_ClientSizeChanged(object? sender, EventArgs e)

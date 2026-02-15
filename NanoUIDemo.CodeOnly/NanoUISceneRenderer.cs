@@ -42,12 +42,12 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
     private NvgContext _nanoContext = null!;
     private NanoUISystem _nanoUISystem = null!;
 
-    // Transient – set only while DrawCore is executing
+    // Transient - set only while DrawCore is executing
     private CommandList? _activeCommandList;
     private GraphicsContext? _activeGraphicsContext;
     private NanoUIComponent? _activeComponent;
 
-    // Camera matrices – extracted once per frame for world-space rendering
+    // Camera matrices - extracted once per frame for world-space rendering
     private Matrix _cameraView;
     private Matrix _cameraViewProjection;
     private bool _hasCameraMatrices;
@@ -323,7 +323,7 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
 
     #endregion
 
-    #region INvgRenderer – Render
+    #region INvgRenderer - Render
 
     public void Render()
     {
@@ -444,7 +444,7 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
 
     #endregion
 
-    #region INvgRenderer – Texture Management
+    #region INvgRenderer - Texture Management
 
     static PixelFormat MapTextureFormat(TextureFormat format)
     {
