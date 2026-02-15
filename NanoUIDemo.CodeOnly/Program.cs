@@ -46,7 +46,6 @@ void Start(Scene scene)
 
     // --- Panel 2: Fixed panel, left side, rotated to face +X ---
     var panelLeft = DemoNanoUIComponent.Create(DemoType.UIExtended, isFullScreen: true);
-    panelLeft.IsBillboard = true;
     var leftEntity = new Entity("NanoUI - Left")
     {
         panelLeft

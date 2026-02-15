@@ -97,6 +97,9 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
             if (components.Count == 0)
                 return;
 
+            // Render world-space panels first, then fullscreen overlays on top
+            components.Sort((a, b) => a.IsFullScreen.CompareTo(b.IsFullScreen));
+
             var backBufferSize = GraphicsDevice.Presenter.BackBuffer.Size;
             var screenSize = new System.Numerics.Vector2(backBufferSize.Width, backBufferSize.Height);
 
