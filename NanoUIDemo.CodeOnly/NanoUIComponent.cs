@@ -61,6 +61,17 @@ public class NanoUIComponent : ActivableEntityComponent
     [DefaultValue(true)]
     public bool IsBillboard { get; set; } = true;
 
+    /// <summary>
+    /// When <c>true</c>, any UI content that falls outside the panel's bounds
+    /// (defined by <see cref="Resolution"/> / <see cref="Size"/>) is clipped
+    /// using a GPU scissor rectangle. Only meaningful for world-space panels
+    /// (<see cref="IsFullScreen"/> = <c>false</c>).
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    [DataMember(55)]
+    [DefaultValue(false)]
+    public bool ClipToBounds { get; set; } = false;
+
     // ──────────────────────────────────────────────
     //  Helpers shared by NanoUISceneRenderer + NanoUISystem
     // ──────────────────────────────────────────────

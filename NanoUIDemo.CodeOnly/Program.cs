@@ -38,7 +38,8 @@ void Start(Scene scene)
     var cyberpunkPanel = DemoNanoUIComponent.CreateCustom(
         screen => new CyberpunkHudDemo(screen),
         isFullScreen: false);
-    cyberpunkPanel.IsBillboard = true;
+    cyberpunkPanel.IsBillboard = false;
+    cyberpunkPanel.ClipToBounds = true;
     var cyberpunkEntity = new Entity("NanoUI - Cyberpunk HUD")
     {
         cyberpunkPanel
@@ -64,6 +65,7 @@ void Start(Scene scene)
         screen => new RetroTerminalDemo(screen),
         isFullScreen: false);
     retroPanel.IsBillboard = false;
+    retroPanel.ClipToBounds = true; // show off the clipping feature with some intentionally oversized content
     var retroEntity = new Entity("NanoUI - Retro Terminal")
     {
         retroPanel

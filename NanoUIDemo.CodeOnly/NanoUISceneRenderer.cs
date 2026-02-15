@@ -147,6 +147,13 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
 
                 // Drive one full NanoUI frame for this view
                 _nanoContext.BeginFrame();
+
+                // Clip content to the panel bounds when requested
+                if (!uiComponent.IsFullScreen && uiComponent.ClipToBounds)
+                {
+                    _nanoContext.Scissor(0, 0, renderSize.X, renderSize.Y);
+                }
+
                 content.Draw(_nanoContext);
                 _nanoContext.EndFrame(); // triggers INvgRenderer.Render() → DoRender()
             }
@@ -247,7 +254,7 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
                 CullMode = CullMode.None,
                 FrontFaceCounterClockwise = true,
                 DepthClipEnable = false,
-                ScissorTestEnable = false,
+                ScissorTestEnable = true,
             },
             DepthStencilState = DepthStencilStates.None,
             PrimitiveType = PrimitiveType.TriangleList,
@@ -269,7 +276,7 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
                 FillMode = FillMode.Solid,
                 CullMode = CullMode.None,
                 FrontFaceCounterClockwise = true,
-                ScissorTestEnable = false,
+                ScissorTestEnable = true,
                 DepthClipEnable = false,
             },
             DepthStencilState = new DepthStencilStateDescription
@@ -311,7 +318,7 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
                 FillMode = FillMode.Solid,
                 CullMode = CullMode.None,
                 FrontFaceCounterClockwise = true,
-                ScissorTestEnable = false,
+                ScissorTestEnable = true,
                 DepthClipEnable = false,
             },
             DepthStencilState = new DepthStencilStateDescription
@@ -360,6 +367,17 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
 
         var backBuffer = GraphicsDevice.Presenter.BackBuffer;
         commandList.SetViewport(new Viewport(0, 0, backBuffer.Width, backBuffer.Height));
+
+        // --- Scissor rectangle for ClipToBounds ---
+        var scissorRect = new Rectangle(0, 0, backBuffer.Width, backBuffer.Height);
+
+        if (_activeComponent != null && !_activeComponent.IsFullScreen
+            && _activeComponent.ClipToBounds && _hasCameraMatrices)
+        {
+            scissorRect = ComputePanelScissorRect(_activeComponent, backBuffer.Width, backBuffer.Height);
+        }
+
+        commandList.SetScissorRectangle(scissorRect);
 
         // --- Compute projection matrix ---
         Matrix projMatrix;
@@ -439,6 +457,55 @@ public class NanoUISceneRenderer : SceneRendererBase, INvgRenderer
             _nanoShader.Apply(graphicsContext);
             commandList.DrawIndexed(drawCommand.IndexCount, drawCommand.IndexOffset, drawCommand.VertexOffset);
         }
+    }
+
+    /// <summary>
+    /// Projects the four corners of a world-space panel onto the screen and returns
+    /// the axis-aligned bounding rectangle clamped to the viewport.
+    /// </summary>
+    Rectangle ComputePanelScissorRect(NanoUIComponent comp, int viewportWidth, int viewportHeight)
+    {
+        var pixelToLocal = comp.GetPixelToLocalMatrix();
+        var worldMatrix  = comp.GetEffectiveWorldMatrix(_cameraView);
+        var fullTransform = pixelToLocal * worldMatrix * _cameraViewProjection;
+
+        // Panel corners in NanoVG pixel space
+        float resX = comp.Resolution.X;
+        float resY = comp.Resolution.Y;
+        Span<Vector3> corners = stackalloc Vector3[4];
+        corners[0] = new Vector3(0,    0,    0); // top-left
+        corners[1] = new Vector3(resX, 0,    0); // top-right
+        corners[2] = new Vector3(resX, resY, 0); // bottom-right
+        corners[3] = new Vector3(0,    resY, 0); // bottom-left
+
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+
+        for (int i = 0; i < 4; i++)
+        {
+            // Transform to clip space
+            Vector3.TransformCoordinate(ref corners[i], ref fullTransform, out var ndc);
+
+            // NDC → screen pixels (Stride NDC: X [-1,1] left→right, Y [-1,1] bottom→top)
+            float sx = (ndc.X * 0.5f + 0.5f) * viewportWidth;
+            float sy = (1f - (ndc.Y * 0.5f + 0.5f)) * viewportHeight;
+
+            if (sx < minX) minX = sx;
+            if (sx > maxX) maxX = sx;
+            if (sy < minY) minY = sy;
+            if (sy > maxY) maxY = sy;
+        }
+
+        // Clamp to viewport
+        int x0 = Math.Max(0, (int)MathF.Floor(minX));
+        int y0 = Math.Max(0, (int)MathF.Floor(minY));
+        int x1 = Math.Min(viewportWidth,  (int)MathF.Ceiling(maxX));
+        int y1 = Math.Min(viewportHeight, (int)MathF.Ceiling(maxY));
+
+        int w = Math.Max(0, x1 - x0);
+        int h = Math.Max(0, y1 - y0);
+
+        return new Rectangle(x0, y0, w, h);
     }
 
     void UpdateIndexBuffer(ReadOnlySpan<ushort> indices, CommandList cmd)
